@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Voice Billing</title>
+<meta name="theme-color" content="#0F6B52">
+<meta name="description" content="Voice billing app for shops — speak product, quantity and price, print the bill on your thermal printer.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F2E7;
+    --paper-panel:#FFFDF8;
+    --ink:#221F1A;
+    --ink-soft:#847A69;
+    --ink-faint:#B7AE9C;
+    --accent:#0F6B52;
+    --accent-dark:#0A4E3B;
+    --accent-soft:#E3EFE9;
+    --danger:#B5342B;
+    --danger-soft:#F5E4E1;
+    --line:#DCD4BE;
+    --line-strong:#C6BC9F;
+    --shadow: 0 8px 24px rgba(34,31,26,0.10);
+    --radius: 18px;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --sans: 'Inter', -apple-system, system-ui, sans-serif;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0; padding:0;}
+  body{
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height:100vh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* subtle paper grain */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image: radial-gradient(rgba(34,31,26,0.035) 1px, transparent 1px);
+    background-size: 3px 3px;
+    pointer-events:none;
+    z-index:0;
+  }
+  #app{ position:relative; z-index:1; max-width:520px; margin:0 auto; padding: 14px 14px 130px; }
+
+  /* ---------- Shop header ---------- */
+  .shopcard{
+    background: var(--ink);
+    color: var(--paper-panel);
+    border-radius: var(--radius);
+    padding: 18px 18px 16px;
+    position:relative;
+    overflow:hidden;
+    box-shadow: var(--shadow);
+  }
+  .shopcard::after{
+    content:"";
+    position:absolute; right:-30px; top:-30px; width:120px; height:120px;
+    background: var(--accent);
+    opacity:0.25;
+    border-radius:50%;
+    filter: blur(2px);
+  }
+  .shopcard .row1{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .shop-name{ font-size:20px; font-weight:800; letter-spacing:-0.01em; line-height:1.15; }
+  .shop-meta{ font-size:12.5px; color:#CFC8B8; margin-top:4px; line-height:1.5; }
+  .edit-shop-btn{
+    border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.06); color:#EFEAE0;
+    border-radius:10px; padding:6px 10px; font-size:11.5px; font-weight:600; font-family:var(--sans);
+    display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;
+  }
+  .bill-strip{ display:flex; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px dashed rgba(255,255,255,0.22); font-family:var(--mono); font-size:12px; color:#D8D2C2; }
+  .bill-strip b{ color:#fff; }
+
+  /* ---------- Section labels ---------- */
+  .section-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.09em; color:var(--ink-soft); margin: 20px 4px 8px; display:flex; align-items:center; gap:6px;}
+
+  /* ---------- Customer row ---------- */
+  .customer-row{ display:flex; gap:8px; }
+  .customer-row input{ flex:1; }
+
+  input[type=text], input[type=number], input[type=tel]{
+    font-family: var(--sans);
+    background: var(--paper-panel);
+    border: 1.5px solid var(--line);
+    border-radius: 12px;
+    padding: 11px 13px;
+    font-size: 15.5px;
+    color: var(--ink);
+    width:100%;
+    outline:none;
+  }
+  input:focus{ border-color: var(--accent); }
+  ::placeholder{ color: var(--ink-faint); }
+
+  /* ---------- Items / receipt list ---------- */
+  .receipt-card{
+    background: var(--paper-panel);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    position:relative;
+    padding: 4px 16px 8px;
+  }
+  .zigzag-top{
+    height:10px;
+    background:
+      linear-gradient(135deg, var(--paper) 50%, transparent 50%) 0 0 / 14px 14px,
+      linear-gradient(-135deg, var(--paper) 50%, transparent 50%) 0 0 / 14px 14px;
+    background-color: var(--paper-panel);
+    margin: 0 -16px;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .empty-state{ text-align:center; padding: 34px 10px 26px; color: var(--ink-soft); }
+  .empty-state .glyph{ font-size:28px; margin-bottom:8px; }
+  .empty-state .t1{ font-weight:700; color:var(--ink); font-size:15px; }
+  .empty-state .t2{ font-size:13px; margin-top:4px; line-height:1.5; }
+
+  .item-row{
+    display:flex; align-items:center; gap:10px;
+    padding: 11px 2px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .item-row:last-child{ border-bottom:none; }
+  .item-idx{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); width:16px; flex-shrink:0; }
+  .item-info{ flex:1; min-width:0; }
+  .item-name{ font-weight:600; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item-sub{ font-family:var(--mono); font-size:12px; color:var(--ink-soft); margin-top:2px; }
+  .item-amt{ font-family:var(--mono); font-weight:600; font-size:15px; white-space:nowrap; }
+  .item-del{
+    width:28px; height:28px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger);
+    font-size:15px; line-height:1; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  }
+
+  .totals{ padding: 10px 2px 14px; }
+  .totals-line{ display:flex; justify-content:space-between; font-family:var(--mono); font-size:13.5px; color:var(--ink-soft); padding:3px 0; }
+  .totals-line.grand{ font-size:19px; font-weight:700; color:var(--ink); padding-top:9px; margin-top:6px; border-top:1.5px solid var(--ink); }
+  .totals-line.grand .amt{ color: var(--accent-dark); }
+  .tax-editrow{ display:flex; align-items:center; gap:8px; }
+  .tax-editrow input{ width:56px; padding:4px 6px; font-size:13px; font-family:var(--mono); text-align:right; border-radius:8px; }
+
+  /* ---------- Bottom action bar ---------- */
+  .actionbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(246,242,231,0) 0%, var(--paper) 22%);
+  }
+  .actionbar-inner{
+    max-width:520px; margin:0 auto; width:100%;
+    display:flex; align-items:center; gap:10px;
+    background: var(--paper-panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 8px 10px;
+    box-shadow: 0 10px 30px rgba(34,31,26,0.16);
+  }
+  .btn{
+    border:none; border-radius:14px; font-family:var(--sans); font-weight:700; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .btn-secondary{ background: var(--accent-soft); color: var(--accent-dark); font-size:12.5px; padding:12px 10px; flex:1; }
+  .btn-print{ background: var(--ink); color:#fff; font-size:12.5px; padding:12px 10px; flex:1; }
+  .mic-btn{
+    width:58px; height:58px; border-radius:50%; flex-shrink:0;
+    background: var(--accent); color:#fff; border:none; font-size:22px;
+    box-shadow: 0 6px 18px rgba(15,107,82,0.45);
+    display:flex; align-items:center; justify-content:center;
+    position:relative;
+  }
+  .mic-btn.listening{ background: var(--danger); box-shadow: 0 6px 18px rgba(181,52,43,0.45); }
+  .mic-btn.listening::before{
+    content:""; position:absolute; inset:-8px; border-radius:50%; border:3px solid var(--danger); opacity:0.5;
+    animation: pulse 1.3s ease-out infinite;
+  }
+  @keyframes pulse{ 0%{ transform:scale(0.85); opacity:0.6;} 100%{ transform:scale(1.5); opacity:0;} }
+  @media (prefers-reduced-motion: reduce){ .mic-btn.listening::before{ animation:none; } }
+
+  .mic-caption{ text-align:center; font-size:11.5px; color: var(--ink-soft); margin-top:6px; height:14px; }
+
+  /* ---------- History ---------- */
+  .history-item{
+    background: var(--paper-panel); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; cursor:pointer;
+  }
+  .history-item:active{ background: var(--accent-soft); }
+  .hi-left b{ font-family:var(--mono); font-size:13.5px; }
+  .hi-left div{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .hi-right{ font-family:var(--mono); font-weight:700; font-size:15px; }
+  .history-empty{ text-align:center; color:var(--ink-faint); font-size:13px; padding: 14px 0 4px; }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(34,31,26,0.55); z-index:100;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .modal-backdrop.hidden{ display:none; }
+  .modal{
+    background: var(--paper); width:100%; max-width:520px; border-radius: 22px 22px 0 0;
+    padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); max-height:88vh; overflow-y:auto;
+  }
+  .modal-title{ font-size:17px; font-weight:800; margin-bottom:2px; }
+  .modal-sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:14px; }
+  .field{ margin-bottom:12px; }
+  .field label{ font-size:11.5px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.06em; display:block; margin-bottom:5px; }
+  .modal-actions{ display:flex; gap:10px; margin-top:6px; }
+  .modal-actions .btn{ flex:1; padding:13px; font-size:14px; border-radius:14px; }
+  .btn-primary{ background: var(--accent); color:#fff; }
+  .btn-ghost{ background: transparent; color: var(--ink-soft); border:1.5px solid var(--line); }
+
+  /* voice confirm sheet */
+  .parsed-row{ display:flex; gap:8px; }
+  .parsed-row .field{ flex:1; }
+  .heard-text{ font-family:var(--mono); font-size:12.5px; background:var(--accent-soft); color:var(--accent-dark); padding:8px 10px; border-radius:10px; margin-bottom:12px; }
+
+  /* toast */
+  #toast{
+    position:fixed; left:50%; bottom:110px; transform:translateX(-50%) translateY(20px);
+    background: var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:13px; font-weight:600;
+    opacity:0; pointer-events:none; transition: all 0.25s ease; z-index:200; white-space:nowrap;
+  }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .icon-btn{ background:none; border:none; color: var(--ink-soft); font-size:13px; font-weight:600; cursor:pointer; }
+
+  /* ---------- Print ---------- */
+  #printArea{ display:none; }
+  @media print{
+    body *{ visibility:hidden; }
+    #printArea, #printArea *{ visibility:visible; }
+    #printArea{
+      display:block; position:absolute; top:0; left:0; width:80mm;
+      font-family: var(--mono); color:#000; padding: 4mm 3mm;
+    }
+    .p-center{ text-align:center; }
+    .p-shop-name{ font-size:15px; font-weight:700; }
+    .p-meta{ font-size:10.5px; margin-top:2px; }
+    .p-rule{ border-top:1px dashed #000; margin:6px 0; }
+    .p-row{ display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px; }
+    .p-item-name{ font-size:11.5px; }
+    .p-item-sub{ font-size:10.5px; display:flex; justify-content:space-between; }
+    .p-total{ font-size:13.5px; font-weight:700; }
+    .p-footer{ font-size:10.5px; margin-top:8px; text-align:center; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <div class="shopcard" id="shopCard">
+    <div class="row1">
+      <div>
+        <div class="shop-name" id="disp-shopName">Your Shop Name</div>
+        <div class="shop-meta" id="disp-shopMeta">Tap edit to add address &amp; phone</div>
+      </div>
+      <button class="edit-shop-btn" id="btnEditShop">✎ Edit</button>
+    </div>
+    <div class="bill-strip">
+      <span>BILL #<b id="disp-billNo">0001</b></span>
+      <span id="disp-date">—</span>
+    </div>
+  </div>
+
+  <div class="section-label">Customer (optional)</div>
+  <div class="customer-row">
+    <input type="text" id="customerName" placeholder="Customer name">
+    <input type="tel" id="customerPhone" placeholder="Phone" style="max-width:120px;">
+  </div>
+
+  <div class="section-label">Items</div>
+  <div class="receipt-card">
+    <div class="zigzag-top"></div>
+    <div id="itemsList"></div>
+  </div>
+
+  <div class="totals" id="totalsBox"></div>
+
+  <div class="section-label">
+    <span>Past bills</span>
+    <span style="margin-left:auto; font-weight:600; text-transform:none; letter-spacing:0;">
+      <button class="icon-btn" id="btnHistory">View all ›</button>
+    </span>
+  </div>
+  <div id="historyPreview"></div>
+
+</div>
+
+<div class="actionbar">
+  <div class="actionbar-inner">
+    <button class="btn btn-secondary" id="btnNew">↺<br>New bill</button>
+    <button class="mic-btn" id="btnMic">🎤</button>
+    <button class="btn btn-print" id="btnPrint">🖨<br>Print</button>
+  </div>
+</div>
+<div class="mic-caption" style="position:fixed; bottom:96px; left:0; right:0;" id="micCaption"></div>
+
+<!-- Settings modal -->
+<div class="modal-backdrop hidden" id="modalSettings">
+  <div class="modal">
+    <div class="modal-title">Shop details</div>
+    <div class="modal-sub">Shown on every bill you print</div>
+    <div class="field"><label>Shop name</label><input type="text" id="in-shopName" placeholder="e.g. Sri Lakshmi General Store"></div>
+    <div class="field"><label>Address</label><input type="text" id="in-shopAddress" placeholder="e.g. Main Road, Rasapudipalem"></div>
+    <div class="field"><label>Phone</label><input type="tel" id="in-shopPhone" placeholder="e.g. 98765 43210"></div>
+    <div class="field"><label>GSTIN (optional)</label><input type="text" id="in-shopGst" placeholder="e.g. 37ABCDE1234F1Z5"></div>
+    <div class="field"><label>Footer note</label><input type="text" id="in-shopFooter" placeholder="e.g. Thank you, visit again!"></div>
+    <div class="field"><label>Tax rate % (0 if none)</label><input type="number" id="in-taxRate" placeholder="0" inputmode="decimal"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCancelSettings">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Voice confirm modal -->
+<div class="modal-backdrop hidden" id="modalVoice">
+  <div class="modal">
+    <div class="modal-title">Confirm item</div>
+    <div class="modal-sub">Check what I heard, fix anything, then add it</div>
+    <div class="heard-text" id="heardText">—</div>
+    <div class="field"><label>Product name</label><input type="text" id="v-name"></div>
+    <div class="parsed-row">
+      <div class="field"><label>Quantity</label><input type="number" id="v-qty" inputmode="decimal"></div>
+      <div class="field"><label>Price / unit ₹</label><input type="number" id="v-price" inputmode="decimal"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCancelVoice">Discard</button>
+      <button class="btn btn-primary" id="btnAddVoice">Add to bill</button>
+    </div>
+  </div>
+</div>
+
+<!-- History modal -->
+<div class="modal-backdrop hidden" id="modalHistory">
+  <div class="modal">
+    <div class="modal-title">Past bills</div>
+    <div class="modal-sub">Tap a bill to reprint it</div>
+    <div id="historyFull"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCloseHistory" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manual add fallback -->
+<div class="modal-backdrop hidden" id="modalManual">
+  <div class="modal">
+    <div class="modal-title">Add item manually</div>
+    <div class="modal-sub">If your phone can't hear you right now</div>
+    <div class="field"><label>Product name</label><input type="text" id="m-name" placeholder="e.g. Sugar"></div>
+    <div class="parsed-row">
+      <div class="field"><label>Quantity</label><input type="number" id="m-qty" value="1" inputmode="decimal"></div>
+      <div class="field"><label>Price / unit ₹</label><input type="number" id="m-price" inputmode="decimal"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCancelManual">Cancel</button>
+      <button class="btn btn-primary" id="btnAddManual">Add to bill</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- Print template -->
+<div id="printArea">
+  <div class="p-center">
+    <div class="p-shop-name" id="pr-shopName"></div>
+    <div class="p-meta" id="pr-shopAddress"></div>
+    <div class="p-meta" id="pr-shopPhone"></div>
+    <div class="p-meta" id="pr-shopGst"></div>
+  </div>
+  <div class="p-rule"></div>
+  <div class="p-row"><span id="pr-billNo"></span><span id="pr-date"></span></div>
+  <div class="p-row" id="pr-customerRow"></div>
+  <div class="p-rule"></div>
+  <div id="pr-items"></div>
+  <div class="p-rule"></div>
+  <div class="p-row"><span>Subtotal</span><span id="pr-subtotal"></span></div>
+  <div class="p-row" id="pr-taxRow"></div>
+  <div class="p-row p-total"><span>TOTAL</span><span id="pr-total"></span></div>
+  <div class="p-footer" id="pr-footer"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- State ----------
+  let settings = { shopName:"", shopAddress:"", shopPhone:"", shopGst:"", shopFooter:"Thank you, visit again!", taxRate:0 };
+  let items = []; // {id,name,qty,price}
+  let billNo = 1;
+  let customerName = "", customerPhone = "";
+  let voicePending = null;
+
+  const $ = (id) => document.getElementById(id);
+  const rupee = (n) => "₹" + (Math.round(n*100)/100).toFixed(2);
+
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(()=>t.classList.remove("show"), 2200);
+  }
+
+  // ---------- Storage helpers (plain localStorage — works standalone, in a hosted PWA, and once packaged as an APK) ----------
+  const NS = "bolbill_";
+  async function saveKey(key, value){
+    try{
+      localStorage.setItem(NS + key, JSON.stringify(value));
+      return true;
+    }catch(e){ console.error("storage error", e); return null; }
+  }
+  async function loadKey(key){
+    try{
+      const v = localStorage.getItem(NS + key);
+      return v ? JSON.parse(v) : null;
+    }catch(e){ return null; }
+  }
+  async function deleteKey(key){
+    try{ localStorage.removeItem(NS + key); }catch(e){}
+  }
+  async function listKeysByPrefix(prefix){
+    const keys = [];
+    for(let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith(NS + prefix)) keys.push(k.slice(NS.length));
+    }
+    return keys;
+  }
+
+  // ---------- Init ----------
+  async function init(){
+    const s = await loadKey("settings");
+    if(s){ settings = Object.assign(settings, s); }
+    const bn = await loadKey("nextBillNo");
+    billNo = bn && bn.n ? bn.n : 1;
+
+    renderShopCard();
+    renderItems();
+    $("disp-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+
+    if(!settings.shopName){
+      openSettings(true);
+    }
+    renderHistoryPreview();
+    setupSpeech();
+  }
+
+  // ---------- Shop card / settings ----------
+  function renderShopCard(){
+    $("disp-shopName").textContent = settings.shopName || "Your Shop Name";
+    const metaBits = [settings.shopAddress, settings.shopPhone].filter(Boolean);
+    $("disp-shopMeta").textContent = metaBits.length ? metaBits.join(" · ") : "Tap edit to add address & phone";
+    $("disp-billNo").textContent = String(billNo).padStart(4,"0");
+  }
+
+  function openSettings(firstRun){
+    $("in-shopName").value = settings.shopName;
+    $("in-shopAddress").value = settings.shopAddress;
+    $("in-shopPhone").value = settings.shopPhone;
+    $("in-shopGst").value = settings.shopGst;
+    $("in-shopFooter").value = settings.shopFooter;
+    $("in-taxRate").value = settings.taxRate || 0;
+    $("modalSettings").classList.remove("hidden");
+    $("btnCancelSettings").style.display = firstRun ? "none" : "flex";
+  }
+  $("btnEditShop").onclick = () => openSettings(false);
+  $("btnCancelSettings").onclick = () => $("modalSettings").classList.add("hidden");
+  $("btnSaveSettings").onclick = async () => {
+    settings = {
+      shopName: $("in-shopName").value.trim() || "Your Shop Name",
+      shopAddress: $("in-shopAddress").value.trim(),
+      shopPhone: $("in-shopPhone").value.trim(),
+      shopGst: $("in-shopGst").value.trim(),
+      shopFooter: $("in-shopFooter").value.trim(),
+      taxRate: parseFloat($("in-taxRate").value) || 0
+    };
+    await saveKey("settings", settings);
+    renderShopCard();
+    renderItems();
+    $("modalSettings").classList.add("hidden");
+    toast("Shop details saved");
+  };
+
+  // ---------- Items rendering ----------
+  function renderItems(){
+    const list = $("itemsList");
+    if(items.length === 0){
+      list.innerHTML = `<div class="empty-state">
+        <div class="glyph">🧾</div>
+        <div class="t1">No items yet</div>
+        <div class="t2">Tap the mic below and say something like<br>"Sugar 2 kilo 90 rupees"</div>
+      </div>`;
+    } else {
+      list.innerHTML = items.map((it, i) => `
+        <div class="item-row">
+          <div class="item-idx">${i+1}</div>
+          <div class="item-info">
+            <div class="item-name">${escapeHtml(it.name)}</div>
+            <div class="item-sub">${it.qty} × ${rupee(it.price)}</div>
+          </div>
+          <div class="item-amt">${rupee(it.qty*it.price)}</div>
+          <button class="item-del" data-id="${it.id}">✕</button>
+        </div>
+      `).join("");
+    }
+    list.querySelectorAll(".item-del").forEach(btn=>{
+      btn.onclick = () => {
+        items = items.filter(it => it.id !== btn.dataset.id);
+        renderItems();
+      };
+    });
+    renderTotals();
+  }
+
+  function computeTotals(){
+    const subtotal = items.reduce((s,it)=> s + it.qty*it.price, 0);
+    const tax = subtotal * (settings.taxRate||0) / 100;
+    return { subtotal, tax, total: subtotal+tax };
+  }
+
+  function renderTotals(){
+    const { subtotal, tax, total } = computeTotals();
+    let html = `<div class="totals-line"><span>Subtotal</span><span class="amt">${rupee(subtotal)}</span></div>`;
+    if(settings.taxRate){
+      html += `<div class="totals-line"><span>Tax (${settings.taxRate}%)</span><span class="amt">${rupee(tax)}</span></div>`;
+    }
+    html += `<div class="totals-line grand"><span>Total</span><span class="amt">${rupee(total)}</span></div>`;
+    $("totalsBox").innerHTML = html;
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+  function titleCase(s){
+    return s.replace(/\w\S*/g, t => t.charAt(0).toUpperCase()+t.slice(1));
+  }
+
+  // ---------- New bill ----------
+  $("btnNew").onclick = () => {
+    if(items.length && !confirm("Start a new bill? Current items will be cleared (they won't be saved unless you already saved this bill).")) return;
+    items = [];
+    customerName = ""; customerPhone = "";
+    $("customerName").value = ""; $("customerPhone").value = "";
+    renderItems();
+    toast("New bill started");
+  };
+  $("customerName").oninput = e => customerName = e.target.value;
+  $("customerPhone").oninput = e => customerPhone = e.target.value;
+
+  // ---------- Manual add ----------
+  $("btnAddManual").onclick = () => {
+    const name = $("m-name").value.trim();
+    const qty = parseFloat($("m-qty").value) || 1;
+    const price = parseFloat($("m-price").value) || 0;
+    if(!name){ toast("Enter a product name"); return; }
+    items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price });
+    renderItems();
+    $("modalManual").classList.add("hidden");
+    $("m-name").value=""; $("m-qty").value="1"; $("m-price").value="";
+  };
+  $("btnCancelManual").onclick = () => $("modalManual").classList.add("hidden");
+
+  // ---------- Voice ----------
+  let recognition = null;
+  let listening = false;
+
+  function setupSpeech(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){
+      $("btnMic").innerHTML = "＋";
+      $("micCaption").textContent = "Voice not supported on this browser — tap to add manually";
+      $("btnMic").onclick = () => $("modalManual").classList.remove("hidden");
+      return;
+    }
+    recognition = new SR();
+    recognition.lang = "en-IN";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      listening = true;
+      $("btnMic").classList.add("listening");
+      $("micCaption").textContent = "Listening… say: product, quantity, price";
+    };
+    recognition.onend = () => {
+      listening = false;
+      $("btnMic").classList.remove("listening");
+      if(!voicePending) $("micCaption").textContent = "";
+    };
+    recognition.onerror = (e) => {
+      listening = false;
+      $("btnMic").classList.remove("listening");
+      if(e.error === "not-allowed" || e.error === "service-not-allowed"){
+        $("micCaption").textContent = "Mic permission blocked — allow it in browser settings";
+      } else if(e.error === "no-speech"){
+        $("micCaption").textContent = "Didn't catch that — tap and try again";
+      } else {
+        $("micCaption").textContent = "Voice error — try again or add manually";
+      }
+    };
+    recognition.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      handleVoiceResult(text);
+    };
+
+    $("btnMic").onclick = () => {
+      if(listening){ recognition.stop(); return; }
+      try{ recognition.start(); }
+      catch(err){ /* already started */ }
+    };
+    // long-press mic => manual entry fallback
+    let pressTimer;
+    $("btnMic").addEventListener("touchstart", ()=>{ pressTimer = setTimeout(()=>{ $("modalManual").classList.remove("hidden"); }, 650); });
+    $("btnMic").addEventListener("touchend", ()=> clearTimeout(pressTimer));
+  }
+
+  function parseVoiceText(raw){
+    let text = raw.toLowerCase().trim();
+    const wordNums = {zero:"0",one:"1",two:"2",three:"3",four:"4",five:"5",six:"6",seven:"7",eight:"8",nine:"9",ten:"10",
+      eleven:"11",twelve:"12",twenty:"20",thirty:"30",forty:"40",fifty:"50",hundred:"100"};
+    Object.keys(wordNums).forEach(w=>{
+      text = text.replace(new RegExp("\\b"+w+"\\b","g"), wordNums[w]);
+    });
+    const numMatches = [...text.matchAll(/\d+(\.\d+)?/g)].map(m=>parseFloat(m[0]));
+    let name = text
+      .replace(/\d+(\.\d+)?/g, " ")
+      .replace(/\b(kg|kilo|kilos|gram|grams|gm|gms|litre|liter|litres|liters|ltr|pcs|piece|pieces|pc|packet|packets|box|boxes|dozen|rupees|rupee|rs|inr|for|at|only|each|of|the|a|an|is)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    let qty = 1, price = 0;
+    if(numMatches.length >= 2){ qty = numMatches[0]; price = numMatches[1]; }
+    else if(numMatches.length === 1){ price = numMatches[0]; }
+    if(!name) name = "Item";
+    return { name: titleCase(name), qty, price, heard: raw };
+  }
+
+  function handleVoiceResult(raw){
+    const parsed = parseVoiceText(raw);
+    voicePending = parsed;
+    $("heardText").textContent = '"' + raw + '"';
+    $("v-name").value = parsed.name;
+    $("v-qty").value = parsed.qty;
+    $("v-price").value = parsed.price;
+    $("modalVoice").classList.remove("hidden");
+    $("micCaption").textContent = "";
+  }
+
+  $("btnAddVoice").onclick = () => {
+    const name = $("v-name").value.trim() || "Item";
+    const qty = parseFloat($("v-qty").value) || 1;
+    const price = parseFloat($("v-price").value) || 0;
+    items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price });
+    renderItems();
+    $("modalVoice").classList.add("hidden");
+    voicePending = null;
+    toast("Item added");
+  };
+  $("btnCancelVoice").onclick = () => {
+    $("modalVoice").classList.add("hidden");
+    voicePending = null;
+  };
+
+  // ---------- Print ----------
+  function buildPrintArea(){
+    $("pr-shopName").textContent = settings.shopName || "Your Shop Name";
+    $("pr-shopAddress").textContent = settings.shopAddress || "";
+    $("pr-shopPhone").textContent = settings.shopPhone ? ("Ph: " + settings.shopPhone) : "";
+    $("pr-shopGst").textContent = settings.shopGst ? ("GSTIN: " + settings.shopGst) : "";
+    $("pr-billNo").textContent = "Bill #" + String(billNo).padStart(4,"0");
+    $("pr-date").textContent = new Date().toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+    $("pr-customerRow").innerHTML = customerName ? `<span>Customer</span><span>${escapeHtml(customerName)}${customerPhone ? " · "+escapeHtml(customerPhone) : ""}</span>` : "";
+
+    $("pr-items").innerHTML = items.map((it,i)=>`
+      <div class="p-item-name">${i+1}. ${escapeHtml(it.name)}</div>
+      <div class="p-item-sub"><span>${it.qty} × ${rupee(it.price)}</span><span>${rupee(it.qty*it.price)}</span></div>
+    `).join("");
+
+    const { subtotal, tax, total } = computeTotals();
+    $("pr-subtotal").textContent = rupee(subtotal);
+    $("pr-taxRow").innerHTML = settings.taxRate ? `<span>Tax (${settings.taxRate}%)</span><span>${rupee(tax)}</span>` : "";
+    $("pr-total").textContent = rupee(total);
+    $("pr-footer").textContent = settings.shopFooter || "";
+  }
+
+  $("btnPrint").onclick = async () => {
+    if(items.length === 0){ toast("Add at least one item first"); return; }
+    buildPrintArea();
+    window.print();
+    await persistBill();
+  };
+
+  async function persistBill(){
+    const { subtotal, tax, total } = computeTotals();
+    const bill = {
+      billNo, date: new Date().toISOString(), items: items.slice(),
+      customerName, customerPhone, subtotal, tax, total,
+      shopSnapshot: Object.assign({}, settings)
+    };
+    await saveKey("bill:" + billNo, bill);
+    const newNext = billNo + 1;
+    await saveKey("nextBillNo", { n: newNext });
+    billNo = newNext;
+    renderShopCard();
+    renderHistoryPreview();
+  }
+
+  // ---------- History ----------
+  async function listBills(){
+    try{
+      const keys = await listKeysByPrefix("bill:");
+      const bills = [];
+      for(const k of keys){
+        const b = await loadKey(k);
+        if(b) bills.push(b);
+      }
+      bills.sort((a,b)=> b.billNo - a.billNo);
+      return bills;
+    }catch(e){ return []; }
+  }
+
+  async function renderHistoryPreview(){
+    const bills = await listBills();
+    const box = $("historyPreview");
+    if(bills.length === 0){
+      box.innerHTML = `<div class="history-empty">Printed bills will show up here</div>`;
+      return;
+    }
+    box.innerHTML = bills.slice(0,3).map(b => historyItemHtml(b)).join("");
+    bindHistoryClicks(box, bills);
+  }
+
+  function historyItemHtml(b){
+    const d = new Date(b.date);
+    return `<div class="history-item" data-billno="${b.billNo}">
+      <div class="hi-left">
+        <b>#${String(b.billNo).padStart(4,"0")}</b>
+        <div>${d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})} · ${b.items.length} item${b.items.length!==1?"s":""}${b.customerName? " · "+escapeHtml(b.customerName):""}</div>
+      </div>
+      <div class="hi-right">${rupee(b.total)}</div>
+    </div>`;
+  }
+
+  function bindHistoryClicks(container, bills){
+    container.querySelectorAll(".history-item").forEach(el=>{
+      el.onclick = () => reprintBill(bills.find(b=>String(b.billNo)===el.dataset.billno));
+    });
+  }
+
+  $("btnHistory").onclick = async () => {
+    const bills = await listBills();
+    const box = $("historyFull");
+    box.innerHTML = bills.length ? bills.map(b=>historyItemHtml(b)).join("") : `<div class="history-empty">No saved bills yet</div>`;
+    bindHistoryClicks(box, bills);
+    $("modalHistory").classList.remove("hidden");
+  };
+  $("btnCloseHistory").onclick = () => $("modalHistory").classList.add("hidden");
+
+  function reprintBill(b){
+    if(!b) return;
+    $("modalHistory").classList.add("hidden");
+    const snap = b.shopSnapshot || settings;
+    $("pr-shopName").textContent = snap.shopName || "Your Shop Name";
+    $("pr-shopAddress").textContent = snap.shopAddress || "";
+    $("pr-shopPhone").textContent = snap.shopPhone ? ("Ph: " + snap.shopPhone) : "";
+    $("pr-shopGst").textContent = snap.shopGst ? ("GSTIN: " + snap.shopGst) : "";
+    $("pr-billNo").textContent = "Bill #" + String(b.billNo).padStart(4,"0");
+    $("pr-date").textContent = new Date(b.date).toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+    $("pr-customerRow").innerHTML = b.customerName ? `<span>Customer</span><span>${escapeHtml(b.customerName)}${b.customerPhone ? " · "+escapeHtml(b.customerPhone) : ""}</span>` : "";
+    $("pr-items").innerHTML = b.items.map((it,i)=>`
+      <div class="p-item-name">${i+1}. ${escapeHtml(it.name)}</div>
+      <div class="p-item-sub"><span>${it.qty} × ${rupee(it.price)}</span><span>${rupee(it.qty*it.price)}</span></div>
+    `).join("");
+    $("pr-subtotal").textContent = rupee(b.subtotal);
+    $("pr-taxRow").innerHTML = b.tax ? `<span>Tax</span><span>${rupee(b.tax)}</span>` : "";
+    $("pr-total").textContent = rupee(b.total);
+    $("pr-footer").textContent = snap.shopFooter || "";
+    window.print();
+  }
+
+  init();
+
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(()=>{ /* fine if this fails, e.g. opened via file:// */ });
+    });
+  }
+})();
+</script>
+</body>
+</html>
