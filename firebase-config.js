@@ -1,5 +1,3 @@
-// Paste your own Firebase project's config here.
-// Get this from: Firebase Console -> Project settings -> General -> "Your apps" -> Web app -> SDK setup and configuration -> Config
 export const firebaseConfig = {
   apiKey: "AIzaSyAYORxZnIr7cyLU1jEWc8fEY2BKIXP2ElA",
   authDomain: "bolbill-64940.firebaseapp.com",
