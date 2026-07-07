@@ -1,4 +1,4 @@
-const CACHE_NAME = "bolbill-v2";
+const CACHE_NAME = "bolbill-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -31,19 +31,16 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// Network-first: always try to get the latest version of a file first.
+// Only fall back to the last-saved cached copy if there's no internet at all.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  // Never cache Firestore/Google API calls — always go live for data.
-  if (event.request.url.includes("firestore.googleapis.com") ||
-      event.request.url.includes("googleapis.com")) return;
+  if (event.request.url.includes("googleapis.com")) return; // Firestore always goes straight to network
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });
