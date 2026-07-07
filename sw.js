@@ -1,10 +1,18 @@
-const CACHE_NAME = "bolbill-v1";
+const CACHE_NAME = "bolbill-v2";
 const ASSETS = [
   "./",
   "./index.html",
+  "./join.html",
+  "./history.html",
+  "./summary.html",
+  "./settings.html",
+  "./style.css",
+  "./data.js",
+  "./firebase-config.js",
   "./manifest.json",
   "./icon-192.png",
-  "./icon-512.png"
+  "./icon-512.png",
+  "./icon-512-maskable.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -25,6 +33,9 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  // Never cache Firestore/Google API calls — always go live for data.
+  if (event.request.url.includes("firestore.googleapis.com") ||
+      event.request.url.includes("googleapis.com")) return;
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

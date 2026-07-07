@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Set up shop</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="center-wrap">
+  <div class="brand">
+    <div class="glyph">🧾</div>
+    <h1>Bol Bill</h1>
+    <p>Voice billing for your shop</p>
+  </div>
+
+  <div class="tabbar">
+    <div class="tabbtn active" id="tabCreate">Create shop</div>
+    <div class="tabbtn" id="tabJoin">Join shop</div>
+  </div>
+
+  <!-- CREATE -->
+  <div id="paneCreate">
+    <div class="field"><label>Shop name</label><input type="text" id="c-shopName" placeholder="e.g. Sri Lakshmi General Store"></div>
+    <div class="field"><label>Set a PIN (4-6 digits)</label><input type="password" id="c-pin" inputmode="numeric" maxlength="6" placeholder="e.g. 1234"></div>
+    <div class="field"><label>Confirm PIN</label><input type="password" id="c-pin2" inputmode="numeric" maxlength="6" placeholder="Re-enter PIN"></div>
+    <div class="error-msg" id="c-error" style="display:none;"></div>
+    <button class="btn btn-primary btn-full" id="btnCreate">Create shop</button>
+    <div class="hint">This makes a new Shop Code. You'll use this Code + PIN to add your other devices later.</div>
+  </div>
+
+  <!-- CREATED (shows code) -->
+  <div id="paneCreated" style="display:none;">
+    <div class="page-sub" style="text-align:center;">Your Shop Code — save this, you'll need it to add other devices</div>
+    <div class="shopcode-display" id="newShopCode">------</div>
+    <button class="btn btn-secondary btn-full" id="btnCopyCode" style="margin-bottom:10px;">📋 Copy code</button>
+    <button class="btn btn-primary btn-full" id="btnContinue">Continue to billing →</button>
+  </div>
+
+  <!-- JOIN -->
+  <div id="paneJoin" style="display:none;">
+    <div class="field"><label>Shop Code</label><input type="text" id="j-code" placeholder="e.g. 7K2QXM" style="text-transform:uppercase; letter-spacing:0.08em;" maxlength="6"></div>
+    <div class="field"><label>PIN</label><input type="password" id="j-pin" inputmode="numeric" maxlength="6" placeholder="Enter the shop's PIN"></div>
+    <div class="error-msg" id="j-error" style="display:none;"></div>
+    <button class="btn btn-primary btn-full" id="btnJoin">Join shop</button>
+    <div class="hint">Ask whoever created the shop for the Shop Code and PIN.</div>
+  </div>
+</div>
+
+<script type="module">
+  import { createShop, joinShop, getSavedShop } from "./data.js";
+
+  // already set up on this device? skip straight to billing
+  if (getSavedShop()) {
+    window.location.href = "index.html";
+  }
+
+  const $ = (id) => document.getElementById(id);
+
+  $("tabCreate").onclick = () => {
+    $("tabCreate").classList.add("active"); $("tabJoin").classList.remove("active");
+    $("paneCreate").style.display = "block"; $("paneJoin").style.display = "none"; $("paneCreated").style.display="none";
+  };
+  $("tabJoin").onclick = () => {
+    $("tabJoin").classList.add("active"); $("tabCreate").classList.remove("active");
+    $("paneJoin").style.display = "block"; $("paneCreate").style.display = "none"; $("paneCreated").style.display="none";
+  };
+
+  function setLoading(btn, loading, label){
+    btn.disabled = loading;
+    btn.innerHTML = loading ? '<span class="spinner"></span> Please wait' : label;
+  }
+
+  let createdCode = "";
+
+  $("btnCreate").onclick = async () => {
+    const name = $("c-shopName").value.trim();
+    const pin = $("c-pin").value.trim();
+    const pin2 = $("c-pin2").value.trim();
+    const err = $("c-error");
+    err.style.display = "none";
+    if (!name){ err.textContent = "Enter your shop name."; err.style.display="block"; return; }
+    if (!/^\d{4,6}$/.test(pin)){ err.textContent = "PIN must be 4-6 digits."; err.style.display="block"; return; }
+    if (pin !== pin2){ err.textContent = "PINs don't match."; err.style.display="block"; return; }
+
+    setLoading($("btnCreate"), true, "Create shop");
+    try{
+      createdCode = await createShop(name, pin);
+      $("newShopCode").textContent = createdCode;
+      $("paneCreate").style.display = "none";
+      $("paneCreated").style.display = "block";
+    }catch(e){
+      console.error(e);
+      err.textContent = "Couldn't reach the server. Check your Firebase setup and internet connection.";
+      err.style.display = "block";
+    }
+    setLoading($("btnCreate"), false, "Create shop");
+  };
+
+  $("btnCopyCode").onclick = () => {
+    navigator.clipboard.writeText(createdCode).then(()=>{
+      $("btnCopyCode").textContent = "✓ Copied";
+      setTimeout(()=> $("btnCopyCode").textContent = "📋 Copy code", 1500);
+    });
+  };
+  $("btnContinue").onclick = () => window.location.href = "index.html";
+
+  $("btnJoin").onclick = async () => {
+    const code = $("j-code").value.trim().toUpperCase();
+    const pin = $("j-pin").value.trim();
+    const err = $("j-error");
+    err.style.display = "none";
+    if (!code){ err.textContent = "Enter the Shop Code."; err.style.display="block"; return; }
+    if (!pin){ err.textContent = "Enter the PIN."; err.style.display="block"; return; }
+
+    setLoading($("btnJoin"), true, "Join shop");
+    try{
+      const res = await joinShop(code, pin);
+      if (res.ok){
+        window.location.href = "index.html";
+      } else {
+        err.textContent = res.reason === "notfound" ? "No shop found with that code." : "Incorrect PIN.";
+        err.style.display = "block";
+      }
+    }catch(e){
+      console.error(e);
+      err.textContent = "Couldn't reach the server. Check your Firebase setup and internet connection.";
+      err.style.display = "block";
+    }
+    setLoading($("btnJoin"), false, "Join shop");
+  };
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

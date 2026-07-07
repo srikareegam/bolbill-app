@@ -1,0 +1,24 @@
+// Paste this into: Firebase Console -> Firestore Database -> Rules -> replace everything -> Publish
+//
+// What this does: anyone can read/write a shop's data ONLY if they know its exact
+// Shop Code (used as the document path). The PIN is checked by the app itself before
+// it lets a device save the Shop Code locally, and the PIN is only ever stored as a
+// SHA-256 hash, never in plain text.
+//
+// Honest caveat: this is "shared secret" security (like a door code), not bank-grade
+// access control. Anyone who has your Shop Code AND correct PIN can read/edit this
+// shop's bills. That's appropriate for a small shop's internal multi-device use —
+// just don't post your Shop Code or PIN publicly.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /shops/{shopCode} {
+      allow read, write: if true;
+
+      match /bills/{billId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Summary</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Day summary</div>
+  <div class="page-sub">Sales totals for any day, synced from every device</div>
+
+  <div class="field"><input type="date" id="dayPicker"></div>
+
+  <div class="summary-hero">
+    <div class="label" id="heroLabel">Today's sales</div>
+    <div class="value" id="heroTotal">₹0.00</div>
+    <div class="summary-stats">
+      <div class="stat-box"><div class="n" id="statBills">0</div><div class="l">Bills</div></div>
+      <div class="stat-box"><div class="n" id="statItems">0</div><div class="l">Items sold</div></div>
+      <div class="stat-box"><div class="n" id="statAvg">₹0</div><div class="l">Avg / bill</div></div>
+    </div>
+  </div>
+
+  <div class="section-label">Top selling items</div>
+  <div class="card" id="topItemsCard">
+    <div class="history-empty">No sales this day</div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item active" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<script type="module">
+import { requireShopOrRedirect, subscribeBills } from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  const rupee = (n) => "₹" + (Math.round(n*100)/100).toFixed(2);
+  function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  let allBills = [];
+  const todayStr = new Date().toISOString().slice(0,10);
+  $("dayPicker").value = todayStr;
+
+  subscribeBills(shop.shopCode, (bills) => { allBills = bills; render(); });
+  $("dayPicker").onchange = render;
+
+  function toDate(b){
+    if (b.createdAt && b.createdAt.toDate) return b.createdAt.toDate();
+    return new Date();
+  }
+  function dateKey(d){
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+
+  function render(){
+    const selected = $("dayPicker").value || todayStr;
+    const dayBills = allBills.filter(b => dateKey(toDate(b)) === selected);
+
+    $("heroLabel").textContent = selected === todayStr ? "Today's sales" : new Date(selected+"T00:00:00").toLocaleDateString('en-IN',{weekday:'long', day:'2-digit', month:'short'}) + " sales";
+    const total = dayBills.reduce((s,b)=> s + b.total, 0);
+    const itemCount = dayBills.reduce((s,b)=> s + b.items.reduce((s2,it)=>s2+it.qty,0), 0);
+    $("heroTotal").textContent = rupee(total);
+    $("statBills").textContent = dayBills.length;
+    $("statItems").textContent = Math.round(itemCount*100)/100;
+    $("statAvg").textContent = dayBills.length ? rupee(total/dayBills.length) : "₹0";
+
+    // top items by revenue
+    const map = {};
+    dayBills.forEach(b => b.items.forEach(it => {
+      const key = it.name.trim().toLowerCase();
+      if (!map[key]) map[key] = { name: it.name, qty: 0, revenue: 0 };
+      map[key].qty += it.qty;
+      map[key].revenue += it.qty * it.price;
+    }));
+    const top = Object.values(map).sort((a,b)=> b.revenue - a.revenue).slice(0, 12);
+    const card = $("topItemsCard");
+    if (top.length === 0){
+      card.innerHTML = `<div class="history-empty">No sales this day</div>`;
+    } else {
+      card.innerHTML = top.map(it => `
+        <div class="topitem-row">
+          <span>${escapeHtml(it.name)} <span class="qty">× ${it.qty}</span></span>
+          <span class="amt">${rupee(it.revenue)}</span>
+        </div>
+      `).join("");
+    }
+  }
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

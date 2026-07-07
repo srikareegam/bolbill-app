@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Settings</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Settings</div>
+  <div class="page-sub">Changes here sync to every device on this shop</div>
+
+  <div class="section-label">Shop details</div>
+  <div class="card">
+    <div class="field"><label>Shop name</label><input type="text" id="in-shopName"></div>
+    <div class="field"><label>Address</label><input type="text" id="in-shopAddress"></div>
+    <div class="field"><label>Phone</label><input type="tel" id="in-shopPhone"></div>
+    <div class="field"><label>GSTIN (optional)</label><input type="text" id="in-shopGst"></div>
+    <div class="field"><label>Footer note</label><input type="text" id="in-shopFooter"></div>
+    <div class="field" style="margin-bottom:0;"><label>Tax rate % (0 if none)</label><input type="number" id="in-taxRate"></div>
+  </div>
+  <button class="btn btn-primary btn-full" id="btnSave" style="margin-top:14px;">Save changes</button>
+
+  <div class="section-label">Add another device to this shop</div>
+  <div class="card">
+    <div class="page-sub" style="margin:0 0 8px;">Give this Shop Code + your PIN to any other phone — open the app there and tap "Join shop".</div>
+    <div class="shopcode-display" id="shopCodeDisplay">------</div>
+    <button class="btn btn-secondary btn-full" id="btnCopyCode">📋 Copy code</button>
+  </div>
+
+  <div class="section-label">This device</div>
+  <button class="btn btn-danger btn-full" id="btnLeave">Sign out of this shop on this device</button>
+  <div class="hint">This only removes the shop from this device. Your data stays safe in the cloud — you can rejoin anytime with the Shop Code + PIN.</div>
+
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item active" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<div id="toast"></div>
+
+<script type="module">
+import { requireShopOrRedirect, subscribeSettings, saveSettings, clearSavedShop } from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  $("shopCodeDisplay").textContent = shop.shopCode;
+
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(()=>t.classList.remove("show"), 2200);
+  }
+
+  subscribeSettings(shop.shopCode, (data) => {
+    $("in-shopName").value = data.shopName || "";
+    $("in-shopAddress").value = data.shopAddress || "";
+    $("in-shopPhone").value = data.shopPhone || "";
+    $("in-shopGst").value = data.shopGst || "";
+    $("in-shopFooter").value = data.shopFooter || "";
+    $("in-taxRate").value = data.taxRate || 0;
+  });
+
+  $("btnSave").onclick = async () => {
+    const btn = $("btnSave");
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span> Saving';
+    try{
+      await saveSettings(shop.shopCode, {
+        shopName: $("in-shopName").value.trim() || "My Shop",
+        shopAddress: $("in-shopAddress").value.trim(),
+        shopPhone: $("in-shopPhone").value.trim(),
+        shopGst: $("in-shopGst").value.trim(),
+        shopFooter: $("in-shopFooter").value.trim(),
+        taxRate: parseFloat($("in-taxRate").value) || 0
+      });
+      toast("Saved — synced to all devices");
+    }catch(e){
+      console.error(e);
+      toast("Couldn't save — check your connection");
+    }
+    btn.disabled = false; btn.textContent = original;
+  };
+
+  $("btnCopyCode").onclick = () => {
+    navigator.clipboard.writeText(shop.shopCode).then(()=>{
+      $("btnCopyCode").textContent = "✓ Copied";
+      setTimeout(()=> $("btnCopyCode").textContent = "📋 Copy code", 1500);
+    });
+  };
+
+  $("btnLeave").onclick = () => {
+    if (!confirm("Sign out of this shop on this device? You can rejoin later with the Shop Code + PIN.")) return;
+    clearSavedShop();
+    window.location.href = "join.html";
+  };
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

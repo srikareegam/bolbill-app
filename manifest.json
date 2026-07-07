@@ -1,7 +1,7 @@
 {
   "name": "Bol Bill — Voice Billing",
   "short_name": "Bol Bill",
-  "description": "Speak the product, quantity and price — get a printable shop bill.",
+  "description": "Speak the product, quantity and price — get a printable shop bill, synced across your devices.",
   "start_url": "./index.html",
   "id": "./index.html",
   "scope": "./",

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — History</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Bill history</div>
+  <div class="page-sub">Every bill printed by any device on this shop</div>
+
+  <div class="filter-row">
+    <div class="filter-chip active" data-f="today">Today</div>
+    <div class="filter-chip" data-f="yesterday">Yesterday</div>
+    <div class="filter-chip" data-f="week">This week</div>
+    <div class="filter-chip" data-f="all">All time</div>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item active" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<div id="printArea">
+  <div class="p-center">
+    <div class="p-shop-name" id="pr-shopName"></div>
+    <div class="p-meta" id="pr-shopAddress"></div>
+    <div class="p-meta" id="pr-shopPhone"></div>
+    <div class="p-meta" id="pr-shopGst"></div>
+  </div>
+  <div class="p-rule"></div>
+  <div class="p-row"><span id="pr-billNo"></span><span id="pr-date"></span></div>
+  <div class="p-row" id="pr-customerRow"></div>
+  <div class="p-rule"></div>
+  <div id="pr-items"></div>
+  <div class="p-rule"></div>
+  <div class="p-row"><span>Subtotal</span><span id="pr-subtotal"></span></div>
+  <div class="p-row" id="pr-taxRow"></div>
+  <div class="p-row p-total"><span>TOTAL</span><span id="pr-total"></span></div>
+  <div class="p-footer" id="pr-footer"></div>
+</div>
+
+<script type="module">
+import { requireShopOrRedirect, subscribeBills, subscribeSettings } from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  const rupee = (n) => "₹" + (Math.round(n*100)/100).toFixed(2);
+  function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  let allBills = [];
+  let settings = {};
+  let currentFilter = "today";
+
+  subscribeSettings(shop.shopCode, (data) => { settings = data; });
+  subscribeBills(shop.shopCode, (bills) => { allBills = bills; render(); });
+
+  function toDate(b){
+    if (b.createdAt && b.createdAt.toDate) return b.createdAt.toDate();
+    return new Date();
+  }
+  function isSameDay(d1, d2){
+    return d1.getFullYear()===d2.getFullYear() && d1.getMonth()===d2.getMonth() && d1.getDate()===d2.getDate();
+  }
+  function filterBills(){
+    const now = new Date();
+    if (currentFilter === "all") return allBills;
+    if (currentFilter === "today") return allBills.filter(b => isSameDay(toDate(b), now));
+    if (currentFilter === "yesterday"){
+      const y = new Date(now); y.setDate(y.getDate()-1);
+      return allBills.filter(b => isSameDay(toDate(b), y));
+    }
+    if (currentFilter === "week"){
+      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate()-7);
+      return allBills.filter(b => toDate(b) >= weekAgo);
+    }
+    return allBills;
+  }
+
+  function render(){
+    const bills = filterBills();
+    const box = $("list");
+    if (bills.length === 0){
+      box.innerHTML = `<div class="history-empty">No bills in this range yet</div>`;
+      return;
+    }
+    box.innerHTML = bills.map(b => {
+      const d = toDate(b);
+      return `<div class="history-item" data-id="${b.id}">
+        <div class="hi-left">
+          <b>#${String(b.billNo).padStart(4,"0")}</b>
+          <div>${d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})} ${d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} · ${b.items.length} item${b.items.length!==1?"s":""}${b.customerName? " · "+escapeHtml(b.customerName):""}</div>
+        </div>
+        <div class="hi-right">${rupee(b.total)}</div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".history-item").forEach(el => {
+      el.onclick = () => reprintBill(bills.find(b => b.id === el.dataset.id));
+    });
+  }
+
+  document.querySelectorAll(".filter-chip").forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      currentFilter = chip.dataset.f;
+      render();
+    };
+  });
+
+  function reprintBill(b){
+    if (!b) return;
+    const d = toDate(b);
+    $("pr-shopName").textContent = settings.shopName || "";
+    $("pr-shopAddress").textContent = settings.shopAddress || "";
+    $("pr-shopPhone").textContent = settings.shopPhone ? ("Ph: " + settings.shopPhone) : "";
+    $("pr-shopGst").textContent = settings.shopGst ? ("GSTIN: " + settings.shopGst) : "";
+    $("pr-billNo").textContent = "Bill #" + String(b.billNo).padStart(4,"0") + " (reprint)";
+    $("pr-date").textContent = d.toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+    $("pr-customerRow").innerHTML = b.customerName ? `<span>Customer</span><span>${escapeHtml(b.customerName)}${b.customerPhone ? " · "+escapeHtml(b.customerPhone) : ""}</span>` : "";
+    $("pr-items").innerHTML = b.items.map((it,i)=>`
+      <div class="p-item-name">${i+1}. ${escapeHtml(it.name)}</div>
+      <div class="p-item-sub"><span>${it.qty} × ${rupee(it.price)}</span><span>${rupee(it.qty*it.price)}</span></div>
+    `).join("");
+    $("pr-subtotal").textContent = rupee(b.subtotal);
+    $("pr-taxRow").innerHTML = b.tax ? `<span>Tax</span><span>${rupee(b.tax)}</span>` : "";
+    $("pr-total").textContent = rupee(b.total);
+    $("pr-footer").textContent = settings.shopFooter || "";
+    window.print();
+  }
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
