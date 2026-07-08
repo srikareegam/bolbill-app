@@ -37,7 +37,13 @@
     <input type="tel" id="customerPhone" placeholder="Phone" style="max-width:120px;">
   </div>
 
-  <div class="section-label">Items</div>
+  <div class="section-label">
+    <span>Items</span>
+    <span style="margin-left:auto; display:flex; gap:14px;">
+      <button class="icon-btn" id="btnManualAdd">+ Manual</button>
+      <button class="icon-btn" id="btnNew">↺ New</button>
+    </span>
+  </div>
   <div class="receipt-card">
     <div class="zigzag-top"></div>
     <div id="itemsList"></div>
@@ -49,9 +55,9 @@
 
 <div class="actionbar">
   <div class="actionbar-inner">
-    <button class="btn btn-secondary" id="btnNew">↺<br>New bill</button>
+    <button class="btn btn-secondary" id="btnSaveOnly">💾<br>Save</button>
     <button class="mic-btn" id="btnMic">🎤</button>
-    <button class="btn btn-print" id="btnPrint">🖨<br>Print &amp; Save</button>
+    <button class="btn btn-print" id="btnPrintSave">🖨<br>Print &amp; Save</button>
   </div>
 </div>
 <div class="mic-caption" id="micCaption"></div>
@@ -205,6 +211,7 @@ if (shop) {
   };
   $("customerName").oninput = e => customerName = e.target.value;
   $("customerPhone").oninput = e => customerPhone = e.target.value;
+  $("btnManualAdd").onclick = () => $("modalManual").classList.remove("hidden");
 
   // ---------- Manual add ----------
   $("btnAddManual").onclick = () => {
@@ -281,7 +288,36 @@ if (shop) {
   };
   $("btnCancelVoice").onclick = () => $("modalVoice").classList.add("hidden");
 
-  // ---------- Print + Save (atomic bill number across all devices) ----------
+  // ---------- WhatsApp ----------
+  function formatWaNumber(phone){
+    let digits = (phone || "").replace(/\D/g, "");
+    if (!digits) return null;
+    if (digits.length === 10) digits = "91" + digits; // assume Indian number if no country code given
+    return digits;
+  }
+  function buildWhatsAppMessage(billNo, totals){
+    const lines = [];
+    lines.push(`*${settings.shopName || "Your Shop"}*`);
+    if (settings.shopPhone) lines.push(`Ph: ${settings.shopPhone}`);
+    lines.push("");
+    lines.push(`Bill #${String(billNo).padStart(4,"0")} · ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}`);
+    lines.push("");
+    items.forEach(it => lines.push(`${it.name} — ${it.qty} × ${rupee(it.price)} = ${rupee(it.qty*it.price)}`));
+    lines.push("");
+    if (settings.taxRate) lines.push(`Subtotal: ${rupee(totals.subtotal)}`);
+    if (settings.taxRate) lines.push(`Tax (${settings.taxRate}%): ${rupee(totals.tax)}`);
+    lines.push(`*Total: ${rupee(totals.total)}*`);
+    if (settings.shopFooter) { lines.push(""); lines.push(settings.shopFooter); }
+    return lines.join("\n");
+  }
+  function sendViaWhatsApp(billNo, totals){
+    const waNumber = formatWaNumber(customerPhone);
+    if (!waNumber) return;
+    const text = encodeURIComponent(buildWhatsAppMessage(billNo, totals));
+    window.open(`https://wa.me/${waNumber}?text=${text}`, "_blank");
+  }
+
+  // ---------- Print template ----------
   function buildPrintArea(billNo, totals){
     $("pr-shopName").textContent = settings.shopName || "Your Shop";
     $("pr-shopAddress").textContent = settings.shopAddress || "";
@@ -300,9 +336,11 @@ if (shop) {
     $("pr-footer").textContent = settings.shopFooter || "";
   }
 
-  $("btnPrint").onclick = async () => {
+  // ---------- Save (shared by both buttons; atomic bill number across all devices) ----------
+  async function saveBill({ alsoPrint }){
     if(items.length === 0){ toast("Add at least one item first"); return; }
-    const btn = $("btnPrint");
+    const btn = alsoPrint ? $("btnPrintSave") : $("btnSaveOnly");
+    const originalLabel = btn.innerHTML;
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
     try{
       const totals = computeTotals();
@@ -311,8 +349,11 @@ if (shop) {
         subtotal: totals.subtotal, tax: totals.tax, total: totals.total
       };
       const billNo = await createBillAtomic(shop.shopCode, billData);
-      buildPrintArea(billNo, totals);
-      window.print();
+      if (alsoPrint){
+        buildPrintArea(billNo, totals);
+        window.print();
+      }
+      sendViaWhatsApp(billNo, totals);
       items = []; customerName=""; customerPhone="";
       $("customerName").value=""; $("customerPhone").value="";
       renderItems();
@@ -321,8 +362,11 @@ if (shop) {
       console.error(e);
       toast("Couldn't save the bill — check your connection");
     }
-    btn.disabled = false; btn.innerHTML = "🖨<br>Print &amp; Save";
-  };
+    btn.disabled = false; btn.innerHTML = originalLabel;
+  }
+
+  $("btnSaveOnly").onclick = () => saveBill({ alsoPrint: false });
+  $("btnPrintSave").onclick = () => saveBill({ alsoPrint: true });
 
   setupSpeech();
 }
