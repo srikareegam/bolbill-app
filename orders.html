@@ -13,11 +13,13 @@
 <style>
   .ex-row{ display:flex; gap:6px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); }
   .ex-row:last-child{ border-bottom:none; }
-  .ex-row input{ padding:8px 9px; font-size:14px; border-radius:10px; }
-  .ex-qty{ width:58px; text-align:right; font-family:var(--mono); }
-  .ex-unit{ width:56px; font-family:var(--mono); }
-  .ex-name{ flex:1; min-width:0; }
-  .ex-del{ width:26px; height:26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger); font-size:13px; cursor:pointer; flex-shrink:0; }
+  .ex-row input[type=number], .ex-row input[type=text]{ padding:8px 9px; font-size:14px; border-radius:10px; }
+  .ex-row input.ex-qty{ width:52px; flex:0 0 52px; text-align:right; font-family:var(--mono); }
+  .ex-row input.ex-unit{ width:50px; flex:0 0 50px; font-family:var(--mono); }
+  .ex-row input.ex-name{ flex:1 1 auto; min-width:80px; width:auto; }
+  .ex-check{ width:22px; height:22px; flex:0 0 22px; accent-color: var(--accent); cursor:pointer; }
+  .ex-row.done input.ex-name{ text-decoration:line-through; color:var(--ink-faint); }
+  .ex-del{ width:26px; height:26px; flex:0 0 26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger); font-size:13px; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -185,10 +187,10 @@ if (shop) {
   // ---------- Gemini extraction ----------
   const PROMPT = `You are reading a handwritten shopping/order list from a customer of an Indian kirana (grocery) shop. The handwriting may mix Telugu and English.
 Extract the customer's name and phone number if written anywhere, and every line item with its quantity, unit and product name.
-Translate or transliterate Telugu product names into simple English a shopkeeper would use (for example: కందిపప్పు -> Toor Dal, పెసర పప్పు -> Moong Dal, బెల్లం -> Jaggery, ఉప్పు -> Salt). Keep brand names exactly as written (Tide, Colgate, Vim, Surf Excel, Santoor).
+IMPORTANT: Keep each product name in EXACTLY the script it was written in. Telugu names stay in Telugu script (for example: కందిపప్పు stays కందిపప్పు — do NOT translate or transliterate to English). English words and brand names stay as written (Tide, Colgate, Vim, Surf Excel, Santoor).
 Convert fractions: ½ becomes 0.5. If a line has no quantity, use 1.
 Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
-{"customer":{"name":"","phone":""},"items":[{"qty":1,"unit":"kg","name":"Toor Dal"}]}
+{"customer":{"name":"","phone":""},"items":[{"qty":1,"unit":"kg","name":"కందిపప్పు"}]}
 Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no unit is written).`;
 
   // Google retires Gemini models often; try these in order and use the first that works.
@@ -259,8 +261,11 @@ Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no un
       <input type="number" step="any" class="ex-qty" value="${Number(it.qty) || 1}" inputmode="decimal">
       <input type="text" class="ex-unit" value="${escapeHtml(it.unit || "")}" placeholder="unit">
       <input type="text" class="ex-name" value="${escapeHtml(it.name || "")}" placeholder="Product name">
+      <input type="checkbox" class="ex-check" title="Packed">
       <button class="ex-del">✕</button>
     `;
+    const check = row.querySelector(".ex-check");
+    check.onchange = () => row.classList.toggle("done", check.checked);
     row.querySelector(".ex-del").onclick = () => row.remove();
     return row;
   }
@@ -272,7 +277,8 @@ Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no un
       const qty = parseFloat(r.querySelector(".ex-qty").value) || 1;
       const unit = r.querySelector(".ex-unit").value.trim();
       const name = r.querySelector(".ex-name").value.trim();
-      if (name) rows.push({ qty, unit, name });
+      const done = r.querySelector(".ex-check").checked;
+      if (name) rows.push({ qty, unit, name, done });
     });
     return rows;
   }
@@ -286,7 +292,7 @@ Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no un
     $("pr-cust").textContent = [cn, cp].filter(Boolean).join(" · ") || "Customer";
     $("pr-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
     $("pr-items").innerHTML = rows.map(r =>
-      `<div class="p-item-name">☐ ${r.qty}${r.unit ? " " + escapeHtml(r.unit) : ""} — ${escapeHtml(r.name)}</div>`
+      `<div class="p-item-name">${r.done ? "☑" : "☐"} ${r.qty}${r.unit ? " " + escapeHtml(r.unit) : ""} — ${escapeHtml(r.name)}</div>`
     ).join("");
     $("pr-count").textContent = rows.length + " items";
     window.print();
