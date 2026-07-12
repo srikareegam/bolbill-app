@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Order Scanner</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .ex-row{ display:flex; gap:6px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); }
+  .ex-row:last-child{ border-bottom:none; }
+  .ex-row input{ padding:8px 9px; font-size:14px; border-radius:10px; }
+  .ex-qty{ width:58px; text-align:right; font-family:var(--mono); }
+  .ex-unit{ width:56px; font-family:var(--mono); }
+  .ex-name{ flex:1; min-width:0; }
+  .ex-del{ width:26px; height:26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger); font-size:13px; cursor:pointer; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Order scanner</div>
+  <div class="page-sub">Photograph a customer's handwritten list — get the items typed out</div>
+
+  <!-- Setup card: shown when no Gemini key saved -->
+  <div class="card" id="setupCard" style="display:none;">
+    <div class="modal-title" style="margin-bottom:6px;">One-time setup</div>
+    <div class="page-sub" style="margin:0 0 12px;">This feature reads handwriting using Google's free Gemini AI. It needs a free API key (takes ~2 minutes):</div>
+    <div class="page-sub" style="margin:0 0 12px; line-height:1.7;">
+      1. Open <b>aistudio.google.com/apikey</b> and sign in with your Google account<br>
+      2. Tap <b>Create API key</b><br>
+      3. Copy the key and paste it below — it syncs to all your shop's devices
+    </div>
+    <div class="field"><label>Gemini API key</label><input type="text" id="in-geminiKey" placeholder="AIzaSy..."></div>
+    <button class="btn btn-primary btn-full" id="btnSaveKey">Save key</button>
+  </div>
+
+  <!-- Scanner card -->
+  <div id="scannerWrap" style="display:none;">
+    <div class="card">
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" accept="image/*" capture="environment">
+        <div class="dz-glyph">📷</div>
+        <div class="dz-main">Photograph the customer's list</div>
+        <div class="dz-sub">or tap to pick a photo from gallery</div>
+      </div>
+      <div class="sticker-preview" id="previewWrap">
+        <img id="previewImg" src="" alt="Preview">
+        <div class="sp-info">
+          <div class="sp-name" id="previewName"></div>
+          <div class="sp-size" id="previewSize"></div>
+        </div>
+        <button class="sp-clear" id="clearBtn" title="Remove photo">✕</button>
+      </div>
+      <div class="error-msg" id="errorMsg" style="display:none; margin-top:14px;"></div>
+      <button class="btn btn-primary btn-full" id="btnRead" disabled style="margin-top:16px;">🔍 Read the list</button>
+      <div class="progress-label" id="readStatus" style="display:none;"></div>
+      <p class="hint" style="margin-top:12px;">The photo is sent to Google's Gemini service to be read. Always check the result — handwriting reading isn't perfect.</p>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsWrap" style="display:none;">
+      <div class="section-label">Customer</div>
+      <div class="customer-row">
+        <input type="text" id="ex-custName" placeholder="Customer name">
+        <input type="tel" id="ex-custPhone" placeholder="Phone" style="max-width:130px;">
+      </div>
+
+      <div class="section-label">
+        <span>Items — check &amp; fix</span>
+        <span style="margin-left:auto;"><button class="icon-btn" id="btnAddRow">+ Add item</button></span>
+      </div>
+      <div class="card" id="itemsCard"></div>
+
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn btn-secondary" id="btnPrintRef">🖨 Print picking list</button>
+        <button class="btn btn-primary" id="btnToBill">→ Load into bill</button>
+      </div>
+      <p class="hint">Picking list prints on your 80mm printer with checkboxes. "Load into bill" opens the billing page with these items — tap each to add its price.</p>
+    </div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item active" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
+  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<div id="toast"></div>
+
+<!-- Print template: picking list -->
+<div id="printArea">
+  <div class="p-center">
+    <div class="p-shop-name" id="pr-title">ORDER LIST</div>
+    <div class="p-meta" id="pr-shop"></div>
+  </div>
+  <div class="p-rule"></div>
+  <div class="p-row"><span id="pr-cust"></span><span id="pr-date"></span></div>
+  <div class="p-rule"></div>
+  <div id="pr-items"></div>
+  <div class="p-rule"></div>
+  <div class="p-footer" id="pr-count"></div>
+</div>
+
+<script type="module">
+import { requireShopOrRedirect, subscribeSettings, saveSettings } from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  let settings = {};
+  let selectedFile = null;
+
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove("show"), 2600);
+  }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  subscribeSettings(shop.shopCode, (data) => {
+    settings = data;
+    const hasKey = !!(settings.geminiKey && settings.geminiKey.trim());
+    $("setupCard").style.display = hasKey ? "none" : "block";
+    $("scannerWrap").style.display = hasKey ? "block" : "none";
+  });
+
+  $("btnSaveKey").onclick = async () => {
+    const key = $("in-geminiKey").value.trim();
+    if (!key){ toast("Paste the API key first"); return; }
+    const btn = $("btnSaveKey");
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving';
+    try{
+      await saveSettings(shop.shopCode, { geminiKey: key });
+      toast("Key saved — synced to all devices");
+    }catch(e){ console.error(e); toast("Couldn't save — check connection"); }
+    btn.disabled = false; btn.textContent = "Save key";
+  };
+
+  // ---------- Photo handling ----------
+  $("fileInput").addEventListener("change", () => {
+    const file = $("fileInput").files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")){ showError("Please pick a photo."); return; }
+    selectedFile = file;
+    hideError();
+    const reader = new FileReader();
+    reader.onload = e => {
+      $("previewImg").src = e.target.result;
+      $("previewName").textContent = file.name || "photo";
+      $("previewSize").textContent = (file.size/1024).toFixed(0) + " KB";
+      $("previewWrap").classList.add("show");
+      $("btnRead").disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+  $("clearBtn").onclick = () => {
+    selectedFile = null; $("fileInput").value = "";
+    $("previewWrap").classList.remove("show");
+    $("btnRead").disabled = true;
+    $("resultsWrap").style.display = "none";
+    hideError();
+  };
+  function showError(msg){ $("errorMsg").textContent = msg; $("errorMsg").style.display = "block"; }
+  function hideError(){ $("errorMsg").style.display = "none"; }
+
+  async function fileToResizedBase64(file, maxDim = 1600){
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+  }
+
+  // ---------- Gemini extraction ----------
+  const PROMPT = `You are reading a handwritten shopping/order list from a customer of an Indian kirana (grocery) shop. The handwriting may mix Telugu and English.
+Extract the customer's name and phone number if written anywhere, and every line item with its quantity, unit and product name.
+Translate or transliterate Telugu product names into simple English a shopkeeper would use (for example: కందిపప్పు -> Toor Dal, పెసర పప్పు -> Moong Dal, బెల్లం -> Jaggery, ఉప్పు -> Salt). Keep brand names exactly as written (Tide, Colgate, Vim, Surf Excel, Santoor).
+Convert fractions: ½ becomes 0.5. If a line has no quantity, use 1.
+Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
+{"customer":{"name":"","phone":""},"items":[{"qty":1,"unit":"kg","name":"Toor Dal"}]}
+Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no unit is written).`;
+
+  $("btnRead").onclick = async () => {
+    if (!selectedFile) return;
+    if (!settings.geminiKey){ showError("No API key saved yet."); return; }
+    hideError();
+    const btn = $("btnRead");
+    btn.disabled = true;
+    $("readStatus").style.display = "block";
+    $("readStatus").textContent = "Reading handwriting… (5–15 seconds)";
+    try{
+      const b64 = await fileToResizedBase64(selectedFile);
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(settings.geminiKey.trim())}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [ { text: PROMPT }, { inline_data: { mime_type: "image/jpeg", data: b64 } } ] }]
+        })
+      });
+      if (!resp.ok){
+        const errBody = await resp.json().catch(()=>({}));
+        const msg = (errBody.error && errBody.error.message) || ("HTTP " + resp.status);
+        if (resp.status === 400 || resp.status === 403) throw new Error("API key problem: " + msg);
+        if (resp.status === 429) throw new Error("Daily free limit reached — try again tomorrow or use a different key.");
+        throw new Error(msg);
+      }
+      const data = await resp.json();
+      const text = (((data.candidates||[])[0]||{}).content||{}).parts?.map(p=>p.text||"").join("") || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      if (!parsed.items || !Array.isArray(parsed.items) || parsed.items.length === 0) throw new Error("Couldn't find any items in the photo — try a clearer, straighter photo.");
+      showResults(parsed);
+    }catch(e){
+      console.error(e);
+      showError("Couldn't read the list: " + e.message);
+    }
+    $("readStatus").style.display = "none";
+    btn.disabled = false;
+  };
+
+  // ---------- Results (editable) ----------
+  function showResults(parsed){
+    $("ex-custName").value = (parsed.customer && parsed.customer.name) || "";
+    $("ex-custPhone").value = (parsed.customer && parsed.customer.phone) || "";
+    const card = $("itemsCard");
+    card.innerHTML = "";
+    parsed.items.forEach(it => card.appendChild(makeRow(it)));
+    $("resultsWrap").style.display = "block";
+    $("resultsWrap").scrollIntoView({ behavior: "smooth" });
+    toast(`Found ${parsed.items.length} items — check them over`);
+  }
+
+  function makeRow(it){
+    const row = document.createElement("div");
+    row.className = "ex-row";
+    row.innerHTML = `
+      <input type="number" step="any" class="ex-qty" value="${Number(it.qty) || 1}" inputmode="decimal">
+      <input type="text" class="ex-unit" value="${escapeHtml(it.unit || "")}" placeholder="unit">
+      <input type="text" class="ex-name" value="${escapeHtml(it.name || "")}" placeholder="Product name">
+      <button class="ex-del">✕</button>
+    `;
+    row.querySelector(".ex-del").onclick = () => row.remove();
+    return row;
+  }
+  $("btnAddRow").onclick = () => $("itemsCard").appendChild(makeRow({ qty: 1, unit: "", name: "" }));
+
+  function collectRows(){
+    const rows = [];
+    $("itemsCard").querySelectorAll(".ex-row").forEach(r => {
+      const qty = parseFloat(r.querySelector(".ex-qty").value) || 1;
+      const unit = r.querySelector(".ex-unit").value.trim();
+      const name = r.querySelector(".ex-name").value.trim();
+      if (name) rows.push({ qty, unit, name });
+    });
+    return rows;
+  }
+
+  // ---------- Print picking list (80mm) ----------
+  $("btnPrintRef").onclick = () => {
+    const rows = collectRows();
+    if (rows.length === 0){ toast("No items to print"); return; }
+    $("pr-shop").textContent = settings.shopName || "";
+    const cn = $("ex-custName").value.trim(), cp = $("ex-custPhone").value.trim();
+    $("pr-cust").textContent = [cn, cp].filter(Boolean).join(" · ") || "Customer";
+    $("pr-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+    $("pr-items").innerHTML = rows.map(r =>
+      `<div class="p-item-name">☐ ${r.qty}${r.unit ? " " + escapeHtml(r.unit) : ""} — ${escapeHtml(r.name)}</div>`
+    ).join("");
+    $("pr-count").textContent = rows.length + " items";
+    window.print();
+  };
+
+  // ---------- Load into bill ----------
+  $("btnToBill").onclick = () => {
+    const rows = collectRows();
+    if (rows.length === 0){ toast("No items to load"); return; }
+    const items = rows.map(r => {
+      // fold small units into the name (price will be per-piece), keep countable qtys numeric
+      if (r.unit === "gm" || r.unit === "ml"){
+        return { name: `${r.name} ${r.qty}${r.unit}`, qty: 1, price: 0 };
+      }
+      const suffix = (r.unit && r.unit !== "pcs") ? ` (${r.unit})` : "";
+      return { name: r.name + suffix, qty: r.qty, price: 0 };
+    });
+    const payload = {
+      customer: { name: $("ex-custName").value.trim(), phone: $("ex-custPhone").value.trim() },
+      items
+    };
+    localStorage.setItem("bolbill_import", JSON.stringify(payload));
+    window.location.href = "index.html";
+  };
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

@@ -69,6 +69,7 @@
   <a class="nav-item active" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
   <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
   <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
   <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
   <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
 </nav>
@@ -197,9 +198,9 @@ if (shop) {
       list.innerHTML = items.map((it, i) => `
         <div class="item-row">
           <div class="item-idx">${i+1}</div>
-          <div class="item-info">
+          <div class="item-info" data-id="${it.id}">
             <div class="item-name">${escapeHtml(it.name)}</div>
-            <div class="item-sub">${it.qty} × ${rupee(it.price)}</div>
+            <div class="item-sub">${it.qty} × ${rupee(it.price)}${it.price ? "" : " — tap to set price"}</div>
           </div>
           <div class="item-amt">${rupee(it.qty*it.price)}</div>
           <button class="item-del" data-id="${it.id}">✕</button>
@@ -208,6 +209,15 @@ if (shop) {
     }
     list.querySelectorAll(".item-del").forEach(btn=>{
       btn.onclick = () => { items = items.filter(it => it.id !== btn.dataset.id); renderItems(); };
+    });
+    list.querySelectorAll(".item-info").forEach(el=>{
+      el.onclick = () => {
+        const it = items.find(i => i.id === el.dataset.id);
+        if(!it) return;
+        editingItemId = it.id;
+        $("m-name").value = it.name; $("m-qty").value = it.qty; $("m-price").value = it.price || "";
+        $("modalManual").classList.remove("hidden");
+      };
     });
     renderTotals();
   }
@@ -235,7 +245,12 @@ if (shop) {
   };
   $("customerName").oninput = e => customerName = e.target.value;
   $("customerPhone").oninput = e => customerPhone = e.target.value;
-  $("btnManualAdd").onclick = () => $("modalManual").classList.remove("hidden");
+  let editingItemId = null;
+  $("btnManualAdd").onclick = () => {
+    editingItemId = null;
+    $("m-name").value=""; $("m-qty").value="1"; $("m-price").value="";
+    $("modalManual").classList.remove("hidden");
+  };
 
   // ---------- Customer directory: remembers name -> phone across bills ----------
   let allCustomers = [];
@@ -277,18 +292,24 @@ if (shop) {
     setTimeout(() => { $("customerSuggestions").classList.add("hidden"); }, 150); // delay so a tap on a suggestion still registers
   });
 
-  // ---------- Manual add ----------
+  // ---------- Manual add / edit ----------
   $("btnAddManual").onclick = () => {
     const name = $("m-name").value.trim();
     const qty = parseFloat($("m-qty").value) || 1;
     const price = parseFloat($("m-price").value) || 0;
     if(!name){ toast("Enter a product name"); return; }
-    items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price });
+    if (editingItemId){
+      const it = items.find(i => i.id === editingItemId);
+      if (it){ it.name = titleCase(name); it.qty = qty; it.price = price; }
+      editingItemId = null;
+    } else {
+      items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price });
+    }
     renderItems();
     $("modalManual").classList.add("hidden");
     $("m-name").value=""; $("m-qty").value="1"; $("m-price").value="";
   };
-  $("btnCancelManual").onclick = () => $("modalManual").classList.add("hidden");
+  $("btnCancelManual").onclick = () => { editingItemId = null; $("modalManual").classList.add("hidden"); };
 
   // ---------- Voice ----------
   let recognition = null, listening = false;
@@ -478,6 +499,24 @@ if (shop) {
 
   $("btnSaveOnly").onclick = () => saveBill({ alsoPrint: false });
   $("btnPrintSave").onclick = () => saveBill({ alsoPrint: true });
+
+  // ---------- Items handed over from the Orders scanner ----------
+  try{
+    const raw = localStorage.getItem("bolbill_import");
+    if (raw){
+      localStorage.removeItem("bolbill_import");
+      const imp = JSON.parse(raw);
+      (imp.items || []).forEach(it => {
+        items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: it.name || "Item", qty: it.qty || 1, price: it.price || 0 });
+      });
+      if (imp.customer){
+        if (imp.customer.name){ customerName = imp.customer.name; $("customerName").value = customerName; }
+        if (imp.customer.phone){ customerPhone = imp.customer.phone; $("customerPhone").value = customerPhone; }
+      }
+      renderItems();
+      if (imp.items && imp.items.length) toast(`Loaded ${imp.items.length} items — tap each to set its price`);
+    }
+  }catch(e){ console.error("import failed", e); }
 
   setupSpeech();
 }

@@ -24,7 +24,8 @@
     <div class="field"><label>Phone</label><input type="tel" id="in-shopPhone"></div>
     <div class="field"><label>GSTIN (optional)</label><input type="text" id="in-shopGst"></div>
     <div class="field"><label>Footer note</label><input type="text" id="in-shopFooter"></div>
-    <div class="field" style="margin-bottom:0;"><label>Tax rate % (0 if none)</label><input type="number" id="in-taxRate"></div>
+    <div class="field"><label>Tax rate % (0 if none)</label><input type="number" id="in-taxRate"></div>
+    <div class="field" style="margin-bottom:0;"><label>Gemini API key (for Order Scanner)</label><input type="text" id="in-geminiKey" placeholder="AIzaSy... — from aistudio.google.com/apikey"></div>
   </div>
   <button class="btn btn-primary btn-full" id="btnSave" style="margin-top:14px;">Save changes</button>
 
@@ -45,6 +46,7 @@
   <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
   <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
   <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
   <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
   <a class="nav-item active" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
 </nav>
@@ -74,6 +76,7 @@ if (shop) {
     $("in-shopGst").value = data.shopGst || "";
     $("in-shopFooter").value = data.shopFooter || "";
     $("in-taxRate").value = data.taxRate || 0;
+    $("in-geminiKey").value = data.geminiKey || "";
   });
 
   $("btnSave").onclick = async () => {
@@ -88,7 +91,8 @@ if (shop) {
         shopPhone: $("in-shopPhone").value.trim(),
         shopGst: $("in-shopGst").value.trim(),
         shopFooter: $("in-shopFooter").value.trim(),
-        taxRate: parseFloat($("in-taxRate").value) || 0
+        taxRate: parseFloat($("in-taxRate").value) || 0,
+        geminiKey: $("in-geminiKey").value.trim()
       });
       toast("Saved — synced to all devices");
     }catch(e){
