@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Sticker Sheets</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="pdf-lib.min.js"></script>
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Sticker sheets</div>
+  <div class="page-sub">Upload a photo — get 12 print-ready school ID stickers as a PDF</div>
+
+  <div class="card">
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp">
+      <div class="dz-glyph">📷</div>
+      <div class="dz-main">Drag &amp; drop a photo here</div>
+      <div class="dz-sub">or tap to browse · JPG, PNG, WEBP</div>
+    </div>
+
+    <div class="sticker-preview" id="previewWrap">
+      <img id="previewImg" src="" alt="Preview">
+      <div class="sp-info">
+        <div class="sp-name" id="previewName"></div>
+        <div class="sp-size" id="previewSize"></div>
+      </div>
+      <button class="sp-clear" id="clearBtn" title="Remove photo">✕</button>
+    </div>
+
+    <div class="badge-row">
+      <span class="mini-badge">2 × 6 grid</span>
+      <span class="mini-badge">12 stickers</span>
+      <span class="mini-badge">A4 · 105 × 49.5 mm each</span>
+    </div>
+
+    <div class="error-msg" id="errorMsg" style="display:none; margin-top:14px;"></div>
+
+    <button class="btn btn-primary btn-full" id="generateBtn" disabled style="margin-top:18px;">
+      🏷️ Generate &amp; Download PDF
+    </button>
+
+    <div class="progress-bar-bg" id="progressWrap" style="display:none;">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-label" id="progressLabel" style="display:none;"></div>
+
+    <div class="success-box" id="successMsg">✓ PDF downloaded — ready to print &amp; cut!</div>
+
+    <p class="hint">Everything runs on your phone. No upload, nothing sent anywhere or saved.</p>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item active" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<script type="module">
+import { requireShopOrRedirect } from "./data.js";
+const shop = requireShopOrRedirect();
+</script>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────
+let selectedFile = null;
+
+const dropzone     = document.getElementById('dropzone');
+const fileInput     = document.getElementById('fileInput');
+const previewWrap   = document.getElementById('previewWrap');
+const previewImg    = document.getElementById('previewImg');
+const previewName   = document.getElementById('previewName');
+const previewSize   = document.getElementById('previewSize');
+const clearBtn       = document.getElementById('clearBtn');
+const generateBtn   = document.getElementById('generateBtn');
+const errorMsg       = document.getElementById('errorMsg');
+const progressWrap  = document.getElementById('progressWrap');
+const progressFill  = document.getElementById('progressFill');
+const progressLabel = document.getElementById('progressLabel');
+const successMsg     = document.getElementById('successMsg');
+
+dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+clearBtn.addEventListener('click', () => {
+  selectedFile = null;
+  fileInput.value = '';
+  previewWrap.classList.remove('show');
+  generateBtn.disabled = true;
+  hideMessages();
+});
+
+function handleFile(file) {
+  hideMessages();
+  const valid = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!valid.includes(file.type)) { showError('Please upload a JPG, PNG, or WEBP image.'); return; }
+  if (file.size > 12 * 1024 * 1024) { showError('File too large. Please use an image under 12 MB.'); return; }
+  selectedFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    previewImg.src = e.target.result;
+    previewName.textContent = file.name;
+    previewSize.textContent = (file.size / 1024).toFixed(0) + ' KB · ' + file.type.split('/')[1].toUpperCase();
+    previewWrap.classList.add('show');
+    generateBtn.disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Generate ─────────────────────────────────────────────────────────────
+generateBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  hideMessages();
+  generateBtn.disabled = true;
+  progressWrap.style.display = 'block';
+  progressLabel.style.display = 'block';
+  setProgress(5, 'Loading photo…');
+
+  try {
+    const imgBitmap = await createImageBitmap(selectedFile);
+    const sq = Math.min(imgBitmap.width, imgBitmap.height);
+    const offX = (imgBitmap.width  - sq) / 2;
+    const offY = (imgBitmap.height - sq) / 2;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = sq;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgBitmap, offX, offY, sq, sq, 0, 0, sq, sq);
+
+    setProgress(20, 'Processing image…');
+    const jpegBytes = await canvasToBytes(canvas);
+
+    setProgress(40, 'Building PDF…');
+    const pdfBytes = await buildStickerPDF(jpegBytes);
+
+    setProgress(90, 'Preparing download…');
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = 'sticker_sheet.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    setProgress(100, 'Done!');
+    setTimeout(() => {
+      progressWrap.style.display = 'none';
+      progressLabel.style.display = 'none';
+      successMsg.classList.add('show');
+      generateBtn.disabled = false;
+    }, 600);
+
+  } catch (err) {
+    console.error(err);
+    progressWrap.style.display = 'none';
+    progressLabel.style.display = 'none';
+    showError('Failed to generate PDF: ' + err.message);
+    generateBtn.disabled = false;
+  }
+});
+
+function canvasToBytes(canvas) {
+  return new Promise((res, rej) => {
+    canvas.toBlob(blob => {
+      if (!blob) { rej(new Error('Canvas export failed')); return; }
+      blob.arrayBuffer().then(ab => res(new Uint8Array(ab))).catch(rej);
+    }, 'image/jpeg', 0.92);
+  });
+}
+
+// ── PDF generation (pdf-lib) — colors matched to Bol Bill's palette ────────
+async function buildStickerPDF(jpegBytes) {
+  const { PDFDocument, rgb } = PDFLib;
+
+  const PAGE_W = 595.25, PAGE_H = 842.0;
+  const COLS = 2, ROWS = 6;
+  const SW = PAGE_W / COLS;
+  const SH = PAGE_H / ROWS;
+
+  const paperBg   = rgb(0.965, 0.949, 0.906); // --paper
+  const accent    = rgb(0.059, 0.420, 0.322); // --accent
+  const white     = rgb(1, 1, 1);
+  const textDark  = rgb(0.133, 0.122, 0.102); // --ink
+  const lineC     = rgb(0.373, 0.365, 0.325); // --ink-soft
+  const borderC   = rgb(0.780, 0.749, 0.667); // --line-strong
+  const photoB    = rgb(0.059, 0.420, 0.322); // --accent
+
+  const pdfDoc = await PDFDocument.create();
+  const page   = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  const photoImg = await pdfDoc.embedJpg(jpegBytes);
+  const fontB = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+
+  for (let idx = 0; idx < 12; idx++) {
+    const row = Math.floor(idx / COLS);
+    const col = idx % COLS;
+    const SX = col * SW;
+    const SY = PAGE_H - (row + 1) * SH;
+
+    page.drawRectangle({ x: SX, y: SY, width: SW, height: SH, color: paperBg });
+
+    const stripH = SH * 0.10;
+    page.drawRectangle({ x: SX, y: SY, width: SW, height: stripH, color: accent });
+
+    const padX = SW * 0.04;
+    const padBottom = stripH + SH * 0.04;
+    const padTop = SH * 0.05;
+    const CX = SX + padX;
+    const CY = SY + padBottom;
+    const CW = SW - 2 * padX;
+    const CH = SH - padBottom - padTop;
+
+    page.drawRectangle({ x: CX, y: CY, width: CW, height: CH, color: white, borderRadius: 10 });
+
+    const photoH = CH * 0.78;
+    const photoW = photoH;
+    const PX = CX + CW - photoW - 6;
+    const PY = CY + (CH - photoH) / 2 + CH * 0.04;
+
+    page.drawRectangle({
+      x: PX - 1.5, y: PY - 1.5, width: photoW + 3, height: photoH + 3,
+      borderColor: photoB, borderWidth: 1.2, color: white, borderRadius: 3,
+    });
+    page.drawImage(photoImg, { x: PX, y: PY, width: photoW, height: photoH });
+
+    const FX = CX + 8;
+    const FEndX = PX - 8;
+    const LW = FEndX - FX;
+    const usableH = CH - 8;
+    const spacing = usableH / 6;
+    const topY = CY + CH - spacing * 0.6 - 10;
+
+    const fields = [
+      { label: 'Name',     lx: FX,             ly: topY,               lw: LW },
+      { label: 'Std.',     lx: FX,             ly: topY - spacing,     lw: LW * 0.40 },
+      { label: 'Div.',     lx: FX + LW * 0.45, ly: topY - spacing,     lw: LW * 0.40 },
+      { label: 'Roll No.', lx: FX,             ly: topY - spacing * 2, lw: LW },
+      { label: 'Sub.',     lx: FX,             ly: topY - spacing * 3, lw: LW * 0.45 },
+      { label: 'School',   lx: FX,             ly: topY - spacing * 4, lw: LW },
+    ];
+
+    const FS = 7.5;
+    for (const f of fields) {
+      page.drawText(f.label, { x: f.lx, y: f.ly + 2, size: FS, font: fontB, color: textDark });
+      const lblW = fontB.widthOfTextAtSize(f.label, FS);
+      page.drawLine({
+        start: { x: f.lx + lblW + 2, y: f.ly }, end: { x: f.lx + f.lw, y: f.ly },
+        thickness: 0.5, color: lineC,
+      });
+    }
+
+    page.drawRectangle({ x: SX, y: SY, width: SW, height: SH, borderColor: borderC, borderWidth: 0.5 });
+  }
+
+  return pdfDoc.save();
+}
+
+function setProgress(pct, label) {
+  progressFill.style.width = pct + '%';
+  progressLabel.textContent = label;
+}
+function showError(msg) {
+  errorMsg.textContent = msg;
+  errorMsg.style.display = 'block';
+}
+function hideMessages() {
+  errorMsg.style.display = 'none';
+  successMsg.classList.remove('show');
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

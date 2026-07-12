@@ -33,7 +33,10 @@
 
   <div class="section-label">Customer (optional)</div>
   <div class="customer-row">
-    <input type="text" id="customerName" placeholder="Customer name">
+    <div class="autocomplete-wrap" style="flex:1;">
+      <input type="text" id="customerName" placeholder="Customer name" autocomplete="off">
+      <div class="autocomplete-list hidden" id="customerSuggestions"></div>
+    </div>
     <input type="tel" id="customerPhone" placeholder="Phone" style="max-width:120px;">
   </div>
 
@@ -66,6 +69,7 @@
   <a class="nav-item active" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
   <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
   <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
   <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
 </nav>
 
@@ -104,6 +108,26 @@
   </div>
 </div>
 
+<!-- WhatsApp confirm -->
+<div class="modal-backdrop hidden" id="modalWaConfirm">
+  <div class="modal">
+    <div class="modal-title">Send bill on WhatsApp?</div>
+    <div class="modal-sub" id="waConfirmSub">Send this bill to the customer's number now</div>
+    <div class="field">
+      <label>Photo (optional — not saved anywhere)</label>
+      <input type="file" accept="image/*" capture="environment" id="waPhotoInput" style="padding:9px;">
+      <div id="waPhotoPreviewWrap" style="display:none; margin-top:8px;">
+        <img id="waPhotoPreview" style="width:100%; border-radius:12px; max-height:180px; object-fit:cover; display:block;">
+      </div>
+      <div class="hint" id="waPhotoHint" style="display:none; margin-top:6px; text-align:left;">With a photo attached, WhatsApp will ask you to pick the customer's chat yourself (photos can't be auto-targeted like text).</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnWaSkip">Not now</button>
+      <button class="btn btn-primary" id="btnWaSend">✅ Send via WhatsApp</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <!-- Print template -->
@@ -127,7 +151,7 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer } from "./data.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -213,6 +237,46 @@ if (shop) {
   $("customerPhone").oninput = e => customerPhone = e.target.value;
   $("btnManualAdd").onclick = () => $("modalManual").classList.remove("hidden");
 
+  // ---------- Customer directory: remembers name -> phone across bills ----------
+  let allCustomers = [];
+  subscribeCustomers(shop.shopCode, (list) => { allCustomers = list; });
+
+  function renderCustomerSuggestions(query){
+    const box = $("customerSuggestions");
+    const q = query.trim().toLowerCase();
+    if (!q){ box.classList.add("hidden"); box.innerHTML = ""; return; }
+    const matches = allCustomers.filter(c => c.name.toLowerCase().includes(q)).slice(0, 6);
+    if (matches.length === 0){ box.classList.add("hidden"); box.innerHTML = ""; return; }
+    box.innerHTML = matches.map(c => `
+      <div class="autocomplete-item" data-name="${escapeHtml(c.name)}" data-phone="${escapeHtml(c.phone)}">
+        <div class="ac-name">${escapeHtml(c.name)}</div>
+        <div class="ac-phone">${escapeHtml(c.phone)}</div>
+      </div>
+    `).join("");
+    box.classList.remove("hidden");
+    box.querySelectorAll(".autocomplete-item").forEach(el => {
+      el.onclick = () => {
+        customerName = el.dataset.name; customerPhone = el.dataset.phone;
+        $("customerName").value = customerName; $("customerPhone").value = customerPhone;
+        box.classList.add("hidden"); box.innerHTML = "";
+      };
+    });
+  }
+
+  $("customerName").oninput = (e) => {
+    customerName = e.target.value;
+    // exact-match autofill: only overwrite phone if the person hasn't already typed one in
+    const exact = allCustomers.find(c => c.name.toLowerCase() === customerName.trim().toLowerCase());
+    if (exact && !$("customerPhone").value.trim()){
+      customerPhone = exact.phone;
+      $("customerPhone").value = exact.phone;
+    }
+    renderCustomerSuggestions(customerName);
+  };
+  $("customerName").addEventListener("blur", () => {
+    setTimeout(() => { $("customerSuggestions").classList.add("hidden"); }, 150); // delay so a tap on a suggestion still registers
+  });
+
   // ---------- Manual add ----------
   $("btnAddManual").onclick = () => {
     const name = $("m-name").value.trim();
@@ -295,14 +359,14 @@ if (shop) {
     if (digits.length === 10) digits = "91" + digits; // assume Indian number if no country code given
     return digits;
   }
-  function buildWhatsAppMessage(billNo, totals){
+  function buildWhatsAppMessage(billNo, totals, itemsSnapshot){
     const lines = [];
     lines.push(`*${settings.shopName || "Your Shop"}*`);
     if (settings.shopPhone) lines.push(`Ph: ${settings.shopPhone}`);
     lines.push("");
     lines.push(`Bill #${String(billNo).padStart(4,"0")} · ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}`);
     lines.push("");
-    items.forEach(it => lines.push(`${it.name} — ${it.qty} × ${rupee(it.price)} = ${rupee(it.qty*it.price)}`));
+    itemsSnapshot.forEach(it => lines.push(`${it.name} — ${it.qty} × ${rupee(it.price)} = ${rupee(it.qty*it.price)}`));
     lines.push("");
     if (settings.taxRate) lines.push(`Subtotal: ${rupee(totals.subtotal)}`);
     if (settings.taxRate) lines.push(`Tax (${settings.taxRate}%): ${rupee(totals.tax)}`);
@@ -310,11 +374,55 @@ if (shop) {
     if (settings.shopFooter) { lines.push(""); lines.push(settings.shopFooter); }
     return lines.join("\n");
   }
-  function sendViaWhatsApp(billNo, totals){
-    const waNumber = formatWaNumber(customerPhone);
+  // ---------- WhatsApp photo (kept in memory only — never uploaded or saved) ----------
+  let waPhotoFile = null;
+  $("waPhotoInput").onchange = (e) => {
+    const file = e.target.files[0] || null;
+    waPhotoFile = file;
+    if (file){
+      $("waPhotoPreview").src = URL.createObjectURL(file);
+      $("waPhotoPreviewWrap").style.display = "block";
+      $("waPhotoHint").style.display = "block";
+    } else {
+      $("waPhotoPreviewWrap").style.display = "none";
+      $("waPhotoHint").style.display = "none";
+    }
+  };
+
+  async function sendViaWhatsApp(phone, billNo, totals, itemsSnapshot){
+    const waNumber = formatWaNumber(phone);
     if (!waNumber) return;
-    const text = encodeURIComponent(buildWhatsAppMessage(billNo, totals));
-    window.open(`https://wa.me/${waNumber}?text=${text}`, "_blank");
+    const text = buildWhatsAppMessage(billNo, totals, itemsSnapshot);
+
+    if (waPhotoFile && navigator.canShare && navigator.canShare({ files: [waPhotoFile] })){
+      try{
+        await navigator.share({ files: [waPhotoFile], text });
+        waPhotoFile = null;
+        return;
+      }catch(err){
+        if (err && err.name === "AbortError") { waPhotoFile = null; return; } // user cancelled the share sheet
+        // sharing failed for some other reason — fall through to the text-only direct link below
+      }
+    } else if (waPhotoFile){
+      toast("Photo sharing isn't supported here — sending text only");
+    }
+    window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`, "_blank");
+    waPhotoFile = null;
+  }
+  function askToSendWhatsApp(phone, billNo, totals, itemsSnapshot){
+    const waNumber = formatWaNumber(phone);
+    if (!waNumber) return;
+    waPhotoFile = null;
+    $("waPhotoInput").value = "";
+    $("waPhotoPreviewWrap").style.display = "none";
+    $("waPhotoHint").style.display = "none";
+    $("waConfirmSub").textContent = `Send Bill #${String(billNo).padStart(4,"0")} to ${phone}`;
+    $("btnWaSend").onclick = () => {
+      $("modalWaConfirm").classList.add("hidden");
+      sendViaWhatsApp(phone, billNo, totals, itemsSnapshot);
+    };
+    $("btnWaSkip").onclick = () => $("modalWaConfirm").classList.add("hidden");
+    $("modalWaConfirm").classList.remove("hidden");
   }
 
   // ---------- Print template ----------
@@ -349,15 +457,18 @@ if (shop) {
         subtotal: totals.subtotal, tax: totals.tax, total: totals.total
       };
       const billNo = await createBillAtomic(shop.shopCode, billData);
+      upsertCustomer(shop.shopCode, customerName, customerPhone).catch(()=>{});
       if (alsoPrint){
         buildPrintArea(billNo, totals);
         window.print();
       }
-      sendViaWhatsApp(billNo, totals);
+      const waPhoneSnapshot = customerPhone;
+      const itemsSnapshot = items.slice();
       items = []; customerName=""; customerPhone="";
       $("customerName").value=""; $("customerPhone").value="";
       renderItems();
       toast("Bill #" + String(billNo).padStart(4,"0") + " saved");
+      askToSendWhatsApp(waPhoneSnapshot, billNo, totals, itemsSnapshot);
     }catch(e){
       console.error(e);
       toast("Couldn't save the bill — check your connection");

@@ -66,6 +66,18 @@ a{ color:inherit; text-decoration:none; }
 /* ---------- Inputs ---------- */
 .customer-row{ display:flex; gap:8px; }
 .customer-row input{ flex:1; }
+.autocomplete-wrap{ position:relative; }
+.autocomplete-list{
+  position:absolute; top:100%; left:0; right:0; margin-top:4px; z-index:50;
+  background: var(--paper-panel); border:1px solid var(--line); border-radius:12px;
+  box-shadow: var(--shadow); max-height:190px; overflow-y:auto;
+}
+.autocomplete-list.hidden{ display:none; }
+.autocomplete-item{ padding:10px 12px; cursor:pointer; border-bottom:1px dashed var(--line); }
+.autocomplete-item:last-child{ border-bottom:none; }
+.autocomplete-item:active{ background: var(--accent-soft); }
+.autocomplete-item .ac-name{ font-size:13.5px; font-weight:600; }
+.autocomplete-item .ac-phone{ font-family:var(--mono); font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
 input[type=text], input[type=number], input[type=tel], input[type=password], input[type=date], select{
   font-family: var(--sans); background: var(--paper-panel); border: 1.5px solid var(--line);
   border-radius: 12px; padding: 11px 13px; font-size: 15.5px; color: var(--ink); width:100%; outline:none;
@@ -226,6 +238,30 @@ input:focus, select:focus{ border-color: var(--accent); }
 .spinner{ display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation: spin 0.7s linear infinite; }
 @keyframes spin{ to{ transform:rotate(360deg); } }
 
+/* ---------- Sticker page: dropzone / progress ---------- */
+.dropzone{
+  border:2px dashed var(--line-strong); border-radius:14px; background: var(--accent-soft);
+  padding:30px 20px; text-align:center; cursor:pointer; position:relative; transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.over{ border-color: var(--accent); background: #D6EAE1; }
+.dropzone input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.dz-glyph{ font-size:30px; margin-bottom:8px; }
+.dz-main{ font-size:14.5px; font-weight:700; color: var(--ink); margin-bottom:3px; }
+.dz-sub{ font-size:12.5px; color: var(--ink-soft); }
+.sticker-preview{ display:none; margin-top:14px; align-items:center; gap:14px; background: var(--paper-panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.sticker-preview.show{ display:flex; }
+.sticker-preview img{ width:56px; height:56px; border-radius:8px; object-fit:cover; border:1px solid var(--line); flex-shrink:0; }
+.sp-info{ flex:1; min-width:0; }
+.sp-name{ font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sp-size{ font-size:12px; color: var(--ink-soft); margin-top:2px; font-family:var(--mono); }
+.sp-clear{ background:none; border:none; cursor:pointer; color: var(--ink-soft); font-size:16px; padding:4px; }
+.badge-row{ display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+.mini-badge{ font-size:11px; font-weight:600; padding:4px 10px; border-radius:100px; background: var(--accent-soft); color: var(--accent-dark); border:1px solid #BFDDD1; }
+.progress-bar-bg{ height:6px; background: var(--line); border-radius:99px; overflow:hidden; margin-top:14px; }
+.progress-bar-fill{ height:100%; background: var(--accent); border-radius:99px; width:0%; transition: width 0.3s ease; }
+.progress-label{ font-size:12px; color: var(--ink-soft); margin-top:7px; text-align:center; }
+.success-box{ display:none; margin-top:14px; padding:10px 14px; background: var(--accent-soft); border:1px solid #BFDDD1; border-radius:10px; font-size:13px; color: var(--accent-dark); font-weight:600; text-align:center; }
+.success-box.show{ display:block; }
 /* ---------- Print ---------- */
 #printArea{ display:none; }
 @media print{

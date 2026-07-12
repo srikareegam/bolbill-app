@@ -101,6 +101,27 @@ export async function createBillAtomic(shopCode, billData) {
   return assignedBillNo;
 }
 
+// ---------- Customer directory (for name -> phone autofill) ----------
+function customerDocId(name) {
+  const slug = (name || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+  return slug || "customer_" + Date.now();
+}
+export async function upsertCustomer(shopCode, name, phone) {
+  name = (name || "").trim();
+  phone = (phone || "").trim();
+  if (!name || !phone) return;
+  const ref = doc(db, "shops", shopCode, "customers", customerDocId(name));
+  await setDoc(ref, { name, phone, updatedAt: serverTimestamp() }, { merge: true });
+}
+export function subscribeCustomers(shopCode, cb) {
+  const col = collection(db, "shops", shopCode, "customers");
+  return onSnapshot(col, (snap) => {
+    const customers = [];
+    snap.forEach(d => customers.push(d.data()));
+    cb(customers);
+  });
+}
+
 export function subscribeBills(shopCode, cb) {
   const billsCol = collection(db, "shops", shopCode, "bills");
   const q = query(billsCol, orderBy("billNo", "desc"));

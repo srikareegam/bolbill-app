@@ -1,4 +1,4 @@
-const CACHE_NAME = "bolbill-v3";
+const CACHE_NAME = "bolbill-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,9 +6,11 @@ const ASSETS = [
   "./history.html",
   "./summary.html",
   "./settings.html",
+  "./stickers.html",
   "./style.css",
   "./data.js",
   "./firebase-config.js",
+  "./pdf-lib.min.js",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
