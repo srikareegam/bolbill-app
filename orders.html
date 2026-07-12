@@ -43,7 +43,7 @@
   <div id="scannerWrap" style="display:none;">
     <div class="card">
       <div class="dropzone" id="dropzone">
-        <input type="file" id="fileInput" accept="image/*" capture="environment">
+        <input type="file" id="fileInput" accept="image/*">
         <div class="dz-glyph">📷</div>
         <div class="dz-main">Photograph the customer's list</div>
         <div class="dz-sub">or tap to pick a photo from gallery</div>
@@ -191,6 +191,31 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
 {"customer":{"name":"","phone":""},"items":[{"qty":1,"unit":"kg","name":"Toor Dal"}]}
 Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no unit is written).`;
 
+  // Google retires Gemini models often; try these in order and use the first that works.
+  const GEMINI_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+
+  async function callGemini(key, b64){
+    let lastErr = null;
+    for (const model of GEMINI_MODELS){
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [ { text: PROMPT }, { inline_data: { mime_type: "image/jpeg", data: b64 } } ] }]
+        })
+      });
+      if (resp.ok) return resp.json();
+      const errBody = await resp.json().catch(()=>({}));
+      const msg = (errBody.error && errBody.error.message) || ("HTTP " + resp.status);
+      // model retired/unknown -> try the next one in the list
+      if (resp.status === 404 || /no longer available|not found/i.test(msg)){ lastErr = new Error(msg); continue; }
+      if (resp.status === 400 || resp.status === 403) throw new Error("API key problem: " + msg);
+      if (resp.status === 429) throw new Error("Daily free limit reached — try again tomorrow or use a different key.");
+      throw new Error(msg);
+    }
+    throw new Error("None of the known Gemini models are available anymore — the app needs a model-name update. (" + (lastErr ? lastErr.message : "") + ")");
+  }
+
   $("btnRead").onclick = async () => {
     if (!selectedFile) return;
     if (!settings.geminiKey){ showError("No API key saved yet."); return; }
@@ -201,21 +226,7 @@ Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no un
     $("readStatus").textContent = "Reading handwriting… (5–15 seconds)";
     try{
       const b64 = await fileToResizedBase64(selectedFile);
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(settings.geminiKey.trim())}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [ { text: PROMPT }, { inline_data: { mime_type: "image/jpeg", data: b64 } } ] }]
-        })
-      });
-      if (!resp.ok){
-        const errBody = await resp.json().catch(()=>({}));
-        const msg = (errBody.error && errBody.error.message) || ("HTTP " + resp.status);
-        if (resp.status === 400 || resp.status === 403) throw new Error("API key problem: " + msg);
-        if (resp.status === 429) throw new Error("Daily free limit reached — try again tomorrow or use a different key.");
-        throw new Error(msg);
-      }
-      const data = await resp.json();
+      const data = await callGemini(settings.geminiKey.trim(), b64);
       const text = (((data.candidates||[])[0]||{}).content||{}).parts?.map(p=>p.text||"").join("") || "";
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
