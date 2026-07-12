@@ -292,7 +292,7 @@ Allowed unit values: "kg","gm","ltr","ml","pkt","pcs","box","" (empty when no un
     $("pr-cust").textContent = [cn, cp].filter(Boolean).join(" · ") || "Customer";
     $("pr-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
     $("pr-items").innerHTML = rows.map(r =>
-      `<div class="p-item-name">${r.done ? "☑" : "☐"} ${r.qty}${r.unit ? " " + escapeHtml(r.unit) : ""} — ${escapeHtml(r.name)}</div>`
+      `<div class="p-row"><span class="p-item-name">${r.qty}${r.unit ? " " + escapeHtml(r.unit) : ""} — ${escapeHtml(r.name)}</span><span>${r.done ? "☑" : "☐"}</span></div>`
     ).join("");
     $("pr-count").textContent = rows.length + " items";
     window.print();
