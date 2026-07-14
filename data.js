@@ -2,7 +2,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc,
-  collection, onSnapshot, query, orderBy,
+  collection, onSnapshot, query, orderBy, where, getDocs,
   serverTimestamp, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -130,4 +130,47 @@ export function subscribeBills(shopCode, cb) {
     snap.forEach(d => bills.push(Object.assign({ id: d.id }, d.data())));
     cb(bills);
   });
+}
+
+// ---------- Staff & attendance ----------
+export function todayKey(d = new Date()) {
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+export async function addStaff(shopCode, name) {
+  const ref = doc(collection(db, "shops", shopCode, "staff"));
+  await setDoc(ref, { name: name.trim(), active: true, createdAt: serverTimestamp() });
+}
+export function subscribeStaff(shopCode, cb) {
+  const col = collection(db, "shops", shopCode, "staff");
+  return onSnapshot(col, (snap) => {
+    const staff = [];
+    snap.forEach(d => staff.push(Object.assign({ id: d.id }, d.data())));
+    staff.sort((a,b) => (a.name||"").localeCompare(b.name||""));
+    cb(staff);
+  });
+}
+export async function setStaffActive(shopCode, staffId, active) {
+  await updateDoc(doc(db, "shops", shopCode, "staff", staffId), { active });
+}
+export async function markAttendance(shopCode, staffId, staffName, type) {
+  const key = todayKey();
+  const ref = doc(db, "shops", shopCode, "attendance", staffId + "_" + key);
+  const payload = { staffId, staffName, dateKey: key };
+  payload[type === "in" ? "inAt" : "outAt"] = serverTimestamp();
+  await setDoc(ref, payload, { merge: true });
+}
+export function subscribeAttendanceForDate(shopCode, dateKey, cb) {
+  const q = query(collection(db, "shops", shopCode, "attendance"), where("dateKey", "==", dateKey));
+  return onSnapshot(q, (snap) => {
+    const recs = [];
+    snap.forEach(d => recs.push(d.data()));
+    cb(recs);
+  });
+}
+export async function getAttendanceRange(shopCode, startKey, endKey) {
+  const q = query(collection(db, "shops", shopCode, "attendance"), where("dateKey", ">=", startKey), where("dateKey", "<=", endKey));
+  const snap = await getDocs(q);
+  const recs = [];
+  snap.forEach(d => recs.push(d.data()));
+  return recs;
 }

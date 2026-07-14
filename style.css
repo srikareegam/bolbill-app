@@ -161,10 +161,11 @@ input:focus, select:focus{ border-color: var(--accent); }
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
 }
 .nav-item{
-  flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 2px;
-  font-size:10.5px; font-weight:600; color: var(--ink-faint); border-radius:12px;
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 0;
+  font-size:9.5px; font-weight:600; color: var(--ink-faint); border-radius:12px; min-width:0;
+  white-space:nowrap; overflow:hidden;
 }
-.nav-item .nav-glyph{ font-size:18px; }
+.nav-item .nav-glyph{ font-size:16px; }
 .nav-item.active{ color: var(--accent-dark); background: var(--accent-soft); }
 
 /* ---------- History ---------- */

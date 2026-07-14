@@ -1,4 +1,4 @@
-const CACHE_NAME = "bolbill-v5";
+const CACHE_NAME = "bolbill-v6";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const ASSETS = [
   "./settings.html",
   "./stickers.html",
   "./orders.html",
+  "./attendance.html",
   "./style.css",
   "./data.js",
   "./firebase-config.js",

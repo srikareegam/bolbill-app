@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Staff Attendance</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .staff-row{ display:flex; align-items:center; gap:10px; padding:11px 2px; border-bottom:1px dashed var(--line); }
+  .staff-row:last-child{ border-bottom:none; }
+  .staff-info{ flex:1; min-width:0; }
+  .staff-name{ font-weight:600; font-size:14.5px; }
+  .staff-status{ font-family:var(--mono); font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .staff-status.in{ color: var(--accent-dark); }
+  .btn-mini{ border:none; border-radius:10px; font-weight:700; font-size:12px; padding:9px 14px; cursor:pointer; flex-shrink:0; }
+  .btn-in{ background: var(--accent); color:#fff; }
+  .btn-out{ background: var(--ink); color:#fff; }
+  .btn-done{ background: var(--accent-soft); color: var(--accent-dark); cursor:default; }
+  .lock-banner{ display:flex; align-items:center; gap:10px; }
+  .lock-banner .glyph{ font-size:22px; }
+  .month-row{ display:flex; justify-content:space-between; padding:9px 2px; border-bottom:1px dashed var(--line); font-size:13.5px; }
+  .month-row:last-child{ border-bottom:none; }
+  .month-row .days{ font-family:var(--mono); font-weight:700; }
+</style>
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Staff attendance</div>
+  <div class="page-sub" id="todayLabel">—</div>
+
+  <div class="section-label">Mark attendance — today</div>
+  <div class="receipt-card">
+    <div class="zigzag-top"></div>
+    <div id="markList"><div class="history-empty">Loading…</div></div>
+  </div>
+
+  <div class="section-label">Owner area</div>
+
+  <!-- Locked banner -->
+  <div class="card lock-banner" id="lockedCard">
+    <span class="glyph">🔒</span>
+    <div style="flex:1;">
+      <div style="font-weight:700; font-size:14px;">Records &amp; staff management</div>
+      <div style="font-size:12px; color:var(--ink-soft);">Password protected — owner only</div>
+    </div>
+    <button class="btn btn-primary" id="btnUnlock" style="padding:10px 16px; font-size:13px;">Open</button>
+  </div>
+
+  <!-- Owner content (hidden until unlocked) -->
+  <div id="ownerWrap" style="display:none;">
+
+    <div class="section-label">Manage staff</div>
+    <div class="card">
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="newStaffName" placeholder="Staff member's name" style="flex:1;">
+        <button class="btn btn-primary" id="btnAddStaff" style="padding:11px 16px; font-size:13px;">Add</button>
+      </div>
+      <div id="staffManageList" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="section-label">Records by day</div>
+    <div class="field"><input type="date" id="dayPicker"></div>
+    <div class="card" id="dayRecords"><div class="history-empty">Pick a date</div></div>
+
+    <div class="section-label">Monthly summary</div>
+    <div class="field"><input type="month" id="monthPicker"></div>
+    <div class="card" id="monthSummary"><div class="history-empty">Pick a month</div></div>
+
+    <div class="section-label">Owner password</div>
+    <button class="btn btn-ghost btn-full" id="btnChangePw">Change owner password</button>
+
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
+  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
+  <a class="nav-item active" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<!-- Password modal (set or enter) -->
+<div class="modal-backdrop hidden" id="modalPw">
+  <div class="modal">
+    <div class="modal-title" id="pwTitle">Owner password</div>
+    <div class="modal-sub" id="pwSub"></div>
+    <div class="field"><label id="pwLabel1">Password</label><input type="password" id="pw1"></div>
+    <div class="field" id="pwField2" style="display:none;"><label>Confirm password</label><input type="password" id="pw2"></div>
+    <div class="error-msg" id="pwError" style="display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnPwCancel">Cancel</button>
+      <button class="btn btn-primary" id="btnPwOk">Continue</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import {
+  requireShopOrRedirect, subscribeSettings, saveSettings, hashPin,
+  subscribeStaff, addStaff, setStaffActive,
+  markAttendance, subscribeAttendanceForDate, getAttendanceRange, todayKey
+} from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  let settings = {};
+  let staff = [];
+  let todayRecs = [];
+  let unlocked = false; // in-memory only: re-locks every time the page is opened
+
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove("show"), 2400);
+  }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function fmtTime(ts){
+    if (!ts || !ts.toDate) return "";
+    return ts.toDate().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+  }
+
+  $("todayLabel").textContent = new Date().toLocaleDateString('en-IN', {weekday:'long', day:'2-digit', month:'short', year:'numeric'});
+
+  subscribeSettings(shop.shopCode, (data) => { settings = data; });
+  subscribeStaff(shop.shopCode, (list) => { staff = list; renderMarkList(); renderStaffManage(); });
+  subscribeAttendanceForDate(shop.shopCode, todayKey(), (recs) => { todayRecs = recs; renderMarkList(); });
+
+  // ---------- Public: mark IN/OUT ----------
+  function renderMarkList(){
+    const box = $("markList");
+    const active = staff.filter(s => s.active !== false);
+    if (active.length === 0){
+      box.innerHTML = `<div class="empty-state"><div class="glyph">🕐</div><div class="t1">No staff added yet</div><div class="t2">The owner can add staff in the Owner area below</div></div>`;
+      return;
+    }
+    box.innerHTML = active.map(s => {
+      const rec = todayRecs.find(r => r.staffId === s.id);
+      let statusHtml, btnHtml;
+      if (!rec || !rec.inAt){
+        statusHtml = `<div class="staff-status">Not checked in</div>`;
+        btnHtml = `<button class="btn-mini btn-in" data-id="${s.id}" data-type="in">✓ IN</button>`;
+      } else if (!rec.outAt){
+        statusHtml = `<div class="staff-status in">In since ${fmtTime(rec.inAt)}</div>`;
+        btnHtml = `<button class="btn-mini btn-out" data-id="${s.id}" data-type="out">OUT →</button>`;
+      } else {
+        statusHtml = `<div class="staff-status">${fmtTime(rec.inAt)} – ${fmtTime(rec.outAt)}</div>`;
+        btnHtml = `<button class="btn-mini btn-done">✓ Done</button>`;
+      }
+      return `<div class="staff-row">
+        <div class="staff-info"><div class="staff-name">${escapeHtml(s.name)}</div>${statusHtml}</div>
+        ${btnHtml}
+      </div>`;
+    }).join("");
+    box.querySelectorAll("[data-type]").forEach(btn => {
+      btn.onclick = async () => {
+        const s = staff.find(x => x.id === btn.dataset.id);
+        if (!s) return;
+        btn.disabled = true;
+        try{
+          await markAttendance(shop.shopCode, s.id, s.name, btn.dataset.type);
+          toast(s.name + (btn.dataset.type === "in" ? " checked in" : " checked out"));
+        }catch(e){ console.error(e); toast("Couldn't save — check connection"); btn.disabled = false; }
+      };
+    });
+  }
+
+  // ---------- Password gate ----------
+  function openPwModal({ mode }){ // mode: "set" | "enter" | "change"
+    $("pwError").style.display = "none";
+    $("pw1").value = ""; $("pw2").value = "";
+    if (mode === "set" || mode === "change"){
+      $("pwTitle").textContent = mode === "set" ? "Set owner password" : "Change owner password";
+      $("pwSub").textContent = "This protects attendance records and staff management. Keep it different from the shop PIN staff already know.";
+      $("pwLabel1").textContent = "New password";
+      $("pwField2").style.display = "block";
+    } else {
+      $("pwTitle").textContent = "Owner password";
+      $("pwSub").textContent = "Enter the owner password to view records";
+      $("pwLabel1").textContent = "Password";
+      $("pwField2").style.display = "none";
+    }
+    $("modalPw").classList.remove("hidden");
+    $("btnPwOk").onclick = async () => {
+      const p1 = $("pw1").value, p2 = $("pw2").value;
+      if (mode === "set" || mode === "change"){
+        if (p1.length < 4){ pwErr("Password must be at least 4 characters."); return; }
+        if (p1 !== p2){ pwErr("Passwords don't match."); return; }
+        try{
+          const h = await hashPin(p1);
+          await saveSettings(shop.shopCode, { ownerPwHash: h });
+          $("modalPw").classList.add("hidden");
+          unlocked = true;
+          showOwner();
+          toast(mode === "set" ? "Password set" : "Password changed");
+        }catch(e){ console.error(e); pwErr("Couldn't save — check connection."); }
+      } else {
+        const h = await hashPin(p1);
+        if (h === settings.ownerPwHash){
+          $("modalPw").classList.add("hidden");
+          unlocked = true;
+          showOwner();
+        } else {
+          pwErr("Incorrect password.");
+        }
+      }
+    };
+  }
+  function pwErr(msg){ $("pwError").textContent = msg; $("pwError").style.display = "block"; }
+  $("btnPwCancel").onclick = () => $("modalPw").classList.add("hidden");
+
+  $("btnUnlock").onclick = () => {
+    if (unlocked){ showOwner(); return; }
+    openPwModal({ mode: settings.ownerPwHash ? "enter" : "set" });
+  };
+  $("btnChangePw").onclick = () => openPwModal({ mode: "change" });
+
+  function showOwner(){
+    $("lockedCard").style.display = "none";
+    $("ownerWrap").style.display = "block";
+    if (!$("dayPicker").value) $("dayPicker").value = todayKey();
+    if (!$("monthPicker").value) $("monthPicker").value = todayKey().slice(0,7);
+    loadDay(); loadMonth();
+  }
+
+  // ---------- Owner: manage staff ----------
+  $("btnAddStaff").onclick = async () => {
+    const name = $("newStaffName").value.trim();
+    if (!name){ toast("Enter a name"); return; }
+    try{
+      await addStaff(shop.shopCode, name);
+      $("newStaffName").value = "";
+      toast("Staff added");
+    }catch(e){ console.error(e); toast("Couldn't add — check connection"); }
+  };
+  function renderStaffManage(){
+    if (!unlocked) return;
+    const box = $("staffManageList");
+    if (staff.length === 0){ box.innerHTML = ""; return; }
+    box.innerHTML = staff.map(s => `
+      <div class="staff-row">
+        <div class="staff-info"><div class="staff-name" style="${s.active === false ? 'text-decoration:line-through; color:var(--ink-faint);' : ''}">${escapeHtml(s.name)}</div></div>
+        <button class="btn-mini ${s.active === false ? 'btn-in' : ''}" style="${s.active === false ? '' : 'background:var(--danger-soft); color:var(--danger);'}" data-id="${s.id}" data-active="${s.active === false}">
+          ${s.active === false ? "Restore" : "Remove"}
+        </button>
+      </div>
+    `).join("");
+    box.querySelectorAll("[data-id]").forEach(btn => {
+      btn.onclick = async () => {
+        try{ await setStaffActive(shop.shopCode, btn.dataset.id, btn.dataset.active === "true"); }
+        catch(e){ toast("Couldn't update"); }
+      };
+    });
+  }
+
+  // ---------- Owner: day records ----------
+  $("dayPicker").onchange = loadDay;
+  async function loadDay(){
+    const key = $("dayPicker").value;
+    if (!key) return;
+    const box = $("dayRecords");
+    box.innerHTML = `<div class="history-empty">Loading…</div>`;
+    try{
+      const recs = await getAttendanceRange(shop.shopCode, key, key);
+      const activeStaff = staff.filter(s => s.active !== false);
+      if (activeStaff.length === 0 && recs.length === 0){ box.innerHTML = `<div class="history-empty">No staff / records</div>`; return; }
+      const rows = activeStaff.map(s => {
+        const r = recs.find(x => x.staffId === s.id);
+        if (!r || !r.inAt) return `<div class="staff-row"><div class="staff-info"><div class="staff-name">${escapeHtml(s.name)}</div><div class="staff-status" style="color:var(--danger);">Absent</div></div></div>`;
+        return `<div class="staff-row"><div class="staff-info"><div class="staff-name">${escapeHtml(s.name)}</div><div class="staff-status in">${fmtTime(r.inAt)}${r.outAt ? " – " + fmtTime(r.outAt) : " (no check-out)"}</div></div></div>`;
+      });
+      box.innerHTML = rows.join("") || `<div class="history-empty">No records</div>`;
+    }catch(e){ console.error(e); box.innerHTML = `<div class="history-empty">Couldn't load — check connection</div>`; }
+  }
+
+  // ---------- Owner: monthly summary ----------
+  $("monthPicker").onchange = loadMonth;
+  async function loadMonth(){
+    const m = $("monthPicker").value; // "2026-07"
+    if (!m) return;
+    const box = $("monthSummary");
+    box.innerHTML = `<div class="history-empty">Loading…</div>`;
+    try{
+      const recs = await getAttendanceRange(shop.shopCode, m + "-01", m + "-31");
+      const counts = {};
+      recs.forEach(r => { if (r.inAt){ counts[r.staffId] = (counts[r.staffId] || 0) + 1; } });
+      const activeStaff = staff.filter(s => s.active !== false);
+      if (activeStaff.length === 0){ box.innerHTML = `<div class="history-empty">No staff yet</div>`; return; }
+      box.innerHTML = activeStaff.map(s =>
+        `<div class="month-row"><span>${escapeHtml(s.name)}</span><span class="days">${counts[s.id] || 0} days</span></div>`
+      ).join("");
+    }catch(e){ console.error(e); box.innerHTML = `<div class="history-empty">Couldn't load — check connection</div>`; }
+  }
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
