@@ -26,8 +26,17 @@
   .lock-screen .t2{ font-size:13px; color:var(--ink-soft); margin:6px 0 22px; }
   .month-row{ display:flex; justify-content:space-between; padding:9px 2px; border-bottom:1px dashed var(--line); font-size:13.5px; }
   .month-row:last-child{ border-bottom:none; }
-  .month-row .days{ font-family:var(--mono); font-weight:700; text-align:right; }
+  .month-row .days{ font-family:var(--mono); font-weight:700; text-align:right; white-space:nowrap; }
   .month-row .days small{ display:block; font-weight:500; color:var(--ink-soft); font-size:10.5px; }
+  .pay-block{ border-bottom:1px dashed var(--line); }
+  .pay-block:last-child{ border-bottom:none; }
+  .pay-block .month-row{ border-bottom:none; }
+  .day-detail{ background: var(--accent-soft); border-radius:10px; padding:6px 10px; margin: 0 0 10px; }
+  .day-detail-row{ display:flex; gap:8px; font-family:var(--mono); font-size:11px; padding:4px 0; border-bottom:1px dashed #C9DED4; }
+  .day-detail-row:last-child{ border-bottom:none; }
+  .dd-date{ flex:0 0 52px; color:var(--ink-soft); }
+  .dd-sess{ flex:1; min-width:0; }
+  .dd-hrs{ flex:0 0 auto; font-weight:700; color:var(--accent-dark); }
 </style>
 </head>
 <body>
@@ -66,8 +75,12 @@
     <div class="field"><input type="date" id="dayPicker"></div>
     <div class="card" id="dayRecords"><div class="history-empty">Pick a date</div></div>
 
-    <div class="section-label">Monthly summary</div>
-    <div class="field"><input type="month" id="monthPicker"></div>
+    <div class="section-label">Monthly report &amp; pay</div>
+    <div style="display:flex; gap:8px;">
+      <div class="field" style="flex:1;"><input type="month" id="monthPicker"></div>
+      <div class="field" style="flex:0 0 118px;"><input type="number" id="payDays" inputmode="numeric" title="Days used to divide the monthly salary"></div>
+    </div>
+    <div class="page-sub" style="margin-top:-6px;">Pay = salary ÷ pay-days × days present. Pay-days box defaults to the month's length — change it if you calculate on 26 or 30 days. Tap a person for their day-by-day hours.</div>
     <div class="card" id="monthSummary"><div class="history-empty">Pick a month</div></div>
 
     <div class="section-label">Owner password</div>
@@ -105,7 +118,7 @@
 <script type="module">
 import {
   requireShopOrRedirect, subscribeSettings, saveSettings, hashPin,
-  subscribeStaff, addStaff, setStaffActive,
+  subscribeStaff, addStaff, setStaffActive, updateStaff,
   markAttendance, subscribeAttendanceForDate, getAttendanceRange, todayKey
 } from "./data.js";
 
@@ -148,7 +161,7 @@ if (shop) {
   $("todayLabel").textContent = new Date().toLocaleDateString('en-IN', {weekday:'long', day:'2-digit', month:'short', year:'numeric'});
 
   subscribeSettings(shop.shopCode, (data) => { settings = data; });
-  subscribeStaff(shop.shopCode, (list) => { staff = list; if (unlocked){ renderMarkList(); renderStaffManage(); } });
+  subscribeStaff(shop.shopCode, (list) => { staff = list; if (unlocked){ renderMarkList(); renderStaffManage(); renderMonth(); } });
   subscribeAttendanceForDate(shop.shopCode, todayKey(), (recs) => { todayRecs = recs; if (unlocked) renderMarkList(); });
 
   // ---------- Password gate (whole page) ----------
@@ -205,7 +218,10 @@ if (shop) {
     renderMarkList();
     renderStaffManage();
     if (!$("dayPicker").value) $("dayPicker").value = todayKey();
-    if (!$("monthPicker").value) $("monthPicker").value = todayKey().slice(0,7);
+    if (!$("monthPicker").value){
+      $("monthPicker").value = todayKey().slice(0,7);
+      $("payDays").value = daysInMonth($("monthPicker").value);
+    }
     loadDay(); loadMonth();
   }
 
@@ -266,6 +282,7 @@ if (shop) {
     box.innerHTML = staff.map(s => `
       <div class="staff-row">
         <div class="staff-info"><div class="staff-name" style="${s.active === false ? 'text-decoration:line-through; color:var(--ink-faint);' : ''}">${escapeHtml(s.name)}</div></div>
+        ${s.active === false ? "" : `<input type="number" class="salary-input" data-sal="${s.id}" value="${s.salary || ""}" placeholder="₹/month" inputmode="numeric" style="width:96px; flex:0 0 96px; padding:8px 9px; font-size:13px; font-family:var(--mono); text-align:right;">`}
         <button class="btn-mini ${s.active === false ? 'btn-in' : ''}" style="${s.active === false ? '' : 'background:var(--danger-soft); color:var(--danger);'}" data-id="${s.id}" data-active="${s.active === false}">
           ${s.active === false ? "Restore" : "Remove"}
         </button>
@@ -275,6 +292,13 @@ if (shop) {
       btn.onclick = async () => {
         try{ await setStaffActive(shop.shopCode, btn.dataset.id, btn.dataset.active === "true"); }
         catch(e){ toast("Couldn't update"); }
+      };
+    });
+    box.querySelectorAll("[data-sal]").forEach(inp => {
+      inp.onchange = async () => {
+        const salary = parseFloat(inp.value) || 0;
+        try{ await updateStaff(shop.shopCode, inp.dataset.sal, { salary }); toast("Salary saved"); }
+        catch(e){ toast("Couldn't save salary"); }
       };
     });
   }
@@ -302,30 +326,79 @@ if (shop) {
     }catch(e){ console.error(e); box.innerHTML = `<div class="history-empty">Couldn't load — check connection</div>`; }
   }
 
-  // ---------- Monthly summary (days present + total hours) ----------
-  $("monthPicker").onchange = loadMonth;
+  // ---------- Monthly report & pay ----------
+  let monthRecsCache = [];
+  function daysInMonth(m){ // m = "2026-07"
+    const [y, mo] = m.split("-").map(Number);
+    return new Date(y, mo, 0).getDate();
+  }
+  const rupeeFmt = (n) => "₹" + Math.round(n).toLocaleString('en-IN');
+
+  $("monthPicker").onchange = () => {
+    $("payDays").value = daysInMonth($("monthPicker").value || todayKey().slice(0,7));
+    loadMonth();
+  };
+  $("payDays").onchange = () => renderMonth();
+
   async function loadMonth(){
     const m = $("monthPicker").value;
     if (!m) return;
+    if (!$("payDays").value) $("payDays").value = daysInMonth(m);
     const box = $("monthSummary");
     box.innerHTML = `<div class="history-empty">Loading…</div>`;
     try{
-      const recs = await getAttendanceRange(shop.shopCode, m + "-01", m + "-31");
-      const byStaff = {};
-      recs.forEach(r => {
-        const sessions = getSessions(r);
-        if (sessions.length === 0) return;
-        if (!byStaff[r.staffId]) byStaff[r.staffId] = { days: 0, ms: 0 };
-        byStaff[r.staffId].days += 1;
-        byStaff[r.staffId].ms += totalMs(sessions);
-      });
-      const activeStaff = staff.filter(s => s.active !== false);
-      if (activeStaff.length === 0){ box.innerHTML = `<div class="history-empty">No staff yet</div>`; return; }
-      box.innerHTML = activeStaff.map(s => {
-        const st = byStaff[s.id] || { days: 0, ms: 0 };
-        return `<div class="month-row"><span>${escapeHtml(s.name)}</span><span class="days">${st.days} days<small>${fmtDur(st.ms)}</small></span></div>`;
-      }).join("");
+      monthRecsCache = await getAttendanceRange(shop.shopCode, m + "-01", m + "-31");
+      renderMonth();
     }catch(e){ console.error(e); box.innerHTML = `<div class="history-empty">Couldn't load — check connection</div>`; }
+  }
+
+  function renderMonth(){
+    const box = $("monthSummary");
+    const payDays = parseInt($("payDays").value) || daysInMonth($("monthPicker").value || todayKey().slice(0,7));
+    const byStaff = {};
+    monthRecsCache.forEach(r => {
+      const sessions = getSessions(r);
+      if (sessions.length === 0) return;
+      if (!byStaff[r.staffId]) byStaff[r.staffId] = { days: 0, ms: 0, records: [] };
+      byStaff[r.staffId].days += 1;
+      byStaff[r.staffId].ms += totalMs(sessions);
+      byStaff[r.staffId].records.push({ dateKey: r.dateKey, sessions });
+    });
+    const activeStaff = staff.filter(s => s.active !== false);
+    if (activeStaff.length === 0){ box.innerHTML = `<div class="history-empty">No staff yet</div>`; return; }
+
+    box.innerHTML = activeStaff.map(s => {
+      const st = byStaff[s.id] || { days: 0, ms: 0, records: [] };
+      const salary = s.salary || 0;
+      const payHtml = salary
+        ? `${rupeeFmt(salary)}/mo → <b style="color:var(--accent-dark);">${rupeeFmt(salary * st.days / payDays)}</b> <span style="color:var(--ink-soft);">(${st.days}/${payDays} days)</span>`
+        : `<span style="color:var(--ink-faint);">set salary in Manage staff</span>`;
+      const detailRows = st.records
+        .sort((a,b) => a.dateKey.localeCompare(b.dateKey))
+        .map(r => {
+          const d = new Date(r.dateKey + "T00:00:00");
+          const open = r.sessions.some(x => x.out === null);
+          return `<div class="day-detail-row">
+            <span class="dd-date">${d.toLocaleDateString('en-IN', {day:'2-digit', month:'short'})}</span>
+            <span class="dd-sess">${fmtSessions(r.sessions)}</span>
+            <span class="dd-hrs">${fmtDur(totalMs(r.sessions))}${open ? " *" : ""}</span>
+          </div>`;
+        }).join("") || `<div class="history-empty" style="padding:8px 0;">No days present</div>`;
+      return `<div class="pay-block">
+        <div class="month-row" data-toggle="${s.id}" style="cursor:pointer;">
+          <span>${escapeHtml(s.name)}<br><small style="font-size:11px; color:var(--ink-soft); font-weight:500;">${payHtml}</small></span>
+          <span class="days">${st.days} days<small>${fmtDur(st.ms)}</small></span>
+        </div>
+        <div class="day-detail" id="detail-${s.id}" style="display:none;">${detailRows}</div>
+      </div>`;
+    }).join("");
+
+    box.querySelectorAll("[data-toggle]").forEach(row => {
+      row.onclick = () => {
+        const d = $("detail-" + row.dataset.toggle);
+        d.style.display = d.style.display === "none" ? "block" : "none";
+      };
+    });
   }
 }
 </script>

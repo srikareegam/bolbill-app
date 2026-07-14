@@ -152,6 +152,9 @@ export function subscribeStaff(shopCode, cb) {
 export async function setStaffActive(shopCode, staffId, active) {
   await updateDoc(doc(db, "shops", shopCode, "staff", staffId), { active });
 }
+export async function updateStaff(shopCode, staffId, fields) {
+  await updateDoc(doc(db, "shops", shopCode, "staff", staffId), fields);
+}
 export async function markAttendance(shopCode, staffId, staffName, type) {
   const key = todayKey();
   const ref = doc(db, "shops", shopCode, "attendance", staffId + "_" + key);
