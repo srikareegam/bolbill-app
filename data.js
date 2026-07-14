@@ -155,9 +155,32 @@ export async function setStaffActive(shopCode, staffId, active) {
 export async function markAttendance(shopCode, staffId, staffName, type) {
   const key = todayKey();
   const ref = doc(db, "shops", shopCode, "attendance", staffId + "_" + key);
-  const payload = { staffId, staffName, dateKey: key };
-  payload[type === "in" ? "inAt" : "outAt"] = serverTimestamp();
-  await setDoc(ref, payload, { merge: true });
+  // sessions: [{in: millis, out: millis|null}, ...] — multiple in/outs per day.
+  // (Client timestamps because Firestore doesn't allow serverTimestamp inside arrays.)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    let sessions = [];
+    if (snap.exists()) {
+      const d = snap.data();
+      if (Array.isArray(d.sessions)) {
+        sessions = d.sessions.slice();
+      } else if (d.inAt) {
+        // migrate old one-session-per-day format
+        const inMs = d.inAt.toMillis ? d.inAt.toMillis() : d.inAt;
+        const outMs = d.outAt ? (d.outAt.toMillis ? d.outAt.toMillis() : d.outAt) : null;
+        sessions = [{ in: inMs, out: outMs }];
+      }
+    }
+    const last = sessions[sessions.length - 1];
+    if (type === "in") {
+      if (last && last.out === null) return; // already checked in — ignore double tap
+      sessions.push({ in: Date.now(), out: null });
+    } else {
+      if (!last || last.out !== null) return; // not currently in — ignore
+      last.out = Date.now();
+    }
+    tx.set(ref, { staffId, staffName, dateKey: key, sessions }, { merge: true });
+  });
 }
 export function subscribeAttendanceForDate(shopCode, dateKey, cb) {
   const q = query(collection(db, "shops", shopCode, "attendance"), where("dateKey", "==", dateKey));
