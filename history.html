@@ -27,6 +27,30 @@
   <div id="list"></div>
 </div>
 
+<!-- Bill detail / edit -->
+<div class="modal-backdrop hidden" id="modalBill">
+  <div class="modal">
+    <div class="modal-title" id="bd-title">Bill</div>
+    <div class="modal-sub">Edit items or customer, then save or reprint</div>
+
+    <div class="customer-row" style="margin-bottom:14px;">
+      <input type="text" id="bd-customerName" placeholder="Customer name">
+      <input type="tel" id="bd-customerPhone" placeholder="Phone" style="max-width:120px;">
+    </div>
+
+    <div id="bd-items"></div>
+    <button class="icon-btn" id="bd-addItem" style="margin:8px 0 4px;">+ Add item</button>
+
+    <div class="totals" id="bd-totals" style="padding-top:6px;"></div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="bd-close">Close</button>
+      <button class="btn btn-secondary" id="bd-reprint">🖨 Reprint</button>
+    </div>
+    <button class="btn btn-primary btn-full" id="bd-save" style="margin-top:10px;">💾 Save changes</button>
+  </div>
+</div>
+
 <nav class="bottom-nav">
   <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
   <a class="nav-item active" href="history.html"><span class="nav-glyph">📜</span>History</a>
@@ -57,7 +81,7 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeBills, subscribeSettings } from "./data.js";
+import { requireShopOrRedirect, subscribeBills, subscribeSettings, updateBill } from "./data.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -112,7 +136,7 @@ if (shop) {
       </div>`;
     }).join("");
     box.querySelectorAll(".history-item").forEach(el => {
-      el.onclick = () => reprintBill(bills.find(b => b.id === el.dataset.id));
+      el.onclick = () => openBillDetail(bills.find(b => b.id === el.dataset.id));
     });
   }
 
@@ -125,26 +149,123 @@ if (shop) {
     };
   });
 
-  function reprintBill(b){
-    if (!b) return;
-    const d = toDate(b);
+  function reprintBill(billNo, dateObj, customerName, customerPhone, items, subtotal, tax, total, tag){
     $("pr-shopName").textContent = settings.shopName || "";
     $("pr-shopAddress").textContent = settings.shopAddress || "";
     $("pr-shopPhone").textContent = settings.shopPhone ? ("Ph: " + settings.shopPhone) : "";
     $("pr-shopGst").textContent = settings.shopGst ? ("GSTIN: " + settings.shopGst) : "";
-    $("pr-billNo").textContent = "Bill #" + String(b.billNo).padStart(4,"0") + " (reprint)";
-    $("pr-date").textContent = d.toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
-    $("pr-customerRow").innerHTML = b.customerName ? `<span>Customer</span><span>${escapeHtml(b.customerName)}${b.customerPhone ? " · "+escapeHtml(b.customerPhone) : ""}</span>` : "";
-    $("pr-items").innerHTML = b.items.map((it,i)=>`
+    $("pr-billNo").textContent = "Bill #" + String(billNo).padStart(4,"0") + (tag ? " (" + tag + ")" : "");
+    $("pr-date").textContent = dateObj.toLocaleString('en-IN', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+    $("pr-customerRow").innerHTML = customerName ? `<span>Customer</span><span>${escapeHtml(customerName)}${customerPhone ? " · "+escapeHtml(customerPhone) : ""}</span>` : "";
+    $("pr-items").innerHTML = items.map((it,i)=>`
       <div class="p-item-name">${i+1}. ${escapeHtml(it.name)}</div>
       <div class="p-item-sub"><span>${it.qty} × ${rupee(it.price)}</span><span>${rupee(it.qty*it.price)}</span></div>
     `).join("");
-    $("pr-subtotal").textContent = rupee(b.subtotal);
-    $("pr-taxRow").innerHTML = b.tax ? `<span>Tax</span><span>${rupee(b.tax)}</span>` : "";
-    $("pr-total").textContent = rupee(b.total);
+    $("pr-subtotal").textContent = rupee(subtotal);
+    $("pr-taxRow").innerHTML = tax ? `<span>Tax</span><span>${rupee(tax)}</span>` : "";
+    $("pr-total").textContent = rupee(total);
     $("pr-footer").textContent = settings.shopFooter || "";
     window.print();
   }
+
+  // ---------- Bill detail / edit ----------
+  let editingBill = null;   // the original bill record
+  let editItems = [];       // working copy of items being edited
+
+  function computeEditTotals(){
+    const subtotal = editItems.reduce((s, it) => s + it.qty * it.price, 0);
+    const tax = subtotal * (settings.taxRate || 0) / 100;
+    return { subtotal, tax, total: subtotal + tax };
+  }
+
+  function renderEditItems(){
+    const box = $("bd-items");
+    if (editItems.length === 0){
+      box.innerHTML = `<div class="history-empty">No items — add one below</div>`;
+    } else {
+      box.innerHTML = editItems.map(it => `
+        <div class="edit-item-row" data-id="${it.id}">
+          <input type="text" class="ei-name" value="${escapeHtml(it.name)}">
+          <input type="number" class="ei-qty" value="${it.qty}" inputmode="decimal">
+          <span class="ei-x">×</span>
+          <input type="number" class="ei-price" value="${it.price}" inputmode="decimal">
+          <button class="ei-del" data-id="${it.id}">✕</button>
+        </div>
+      `).join("");
+    }
+    box.querySelectorAll(".ei-del").forEach(btn => {
+      btn.onclick = () => { editItems = editItems.filter(it => it.id !== btn.dataset.id); renderEditItems(); };
+    });
+    box.querySelectorAll(".ei-name, .ei-qty, .ei-price").forEach(inp => {
+      inp.oninput = () => {
+        const row = inp.closest(".edit-item-row");
+        const it = editItems.find(i => i.id === row.dataset.id);
+        if (!it) return;
+        if (inp.classList.contains("ei-name")) it.name = inp.value;
+        if (inp.classList.contains("ei-qty")) it.qty = parseFloat(inp.value) || 0;
+        if (inp.classList.contains("ei-price")) it.price = parseFloat(inp.value) || 0;
+        renderEditTotals();
+      };
+    });
+    renderEditTotals();
+  }
+
+  function renderEditTotals(){
+    const { subtotal, tax, total } = computeEditTotals();
+    let html = `<div class="totals-line"><span>Subtotal</span><span class="amt">${rupee(subtotal)}</span></div>`;
+    if (settings.taxRate) html += `<div class="totals-line"><span>Tax (${settings.taxRate}%)</span><span class="amt">${rupee(tax)}</span></div>`;
+    html += `<div class="totals-line grand"><span>Total</span><span class="amt">${rupee(total)}</span></div>`;
+    $("bd-totals").innerHTML = html;
+  }
+
+  function openBillDetail(b){
+    if (!b) return;
+    editingBill = b;
+    editItems = b.items.map(it => Object.assign({}, it, { id: it.id || (Date.now()+"_"+Math.random().toString(36).slice(2)) }));
+    $("bd-title").textContent = "Bill #" + String(b.billNo).padStart(4,"0");
+    $("bd-customerName").value = b.customerName || "";
+    $("bd-customerPhone").value = b.customerPhone || "";
+    renderEditItems();
+    $("modalBill").classList.remove("hidden");
+  }
+
+  $("bd-addItem").onclick = () => {
+    editItems.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: "", qty: 1, price: 0 });
+    renderEditItems();
+  };
+  $("bd-close").onclick = () => { $("modalBill").classList.add("hidden"); editingBill = null; };
+
+  $("bd-reprint").onclick = () => {
+    if (!editingBill) return;
+    const { subtotal, tax, total } = computeEditTotals();
+    reprintBill(editingBill.billNo, toDate(editingBill), $("bd-customerName").value.trim(), $("bd-customerPhone").value.trim(), editItems, subtotal, tax, total, "reprint");
+  };
+
+  $("bd-save").onclick = async () => {
+    if (!editingBill) return;
+    const cleanItems = editItems.filter(it => it.name.trim() && it.qty > 0 && it.price >= 0)
+      .map(it => Object.assign({}, it, { name: it.name.trim() }));
+    if (cleanItems.length === 0){ alert("A bill needs at least one item with a name, quantity and price."); return; }
+    editItems = cleanItems;
+    const { subtotal, tax, total } = computeEditTotals();
+    const btn = $("bd-save");
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = "Saving…";
+    try{
+      await updateBill(shop.shopCode, editingBill.id, {
+        items: cleanItems,
+        customerName: $("bd-customerName").value.trim(),
+        customerPhone: $("bd-customerPhone").value.trim(),
+        subtotal, tax, total
+      });
+      $("modalBill").classList.add("hidden");
+      editingBill = null;
+    }catch(e){
+      console.error(e);
+      alert("Couldn't save changes — check your connection.");
+    }
+    btn.disabled = false; btn.textContent = original;
+  };
 }
 </script>
 <script>

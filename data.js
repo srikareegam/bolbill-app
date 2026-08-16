@@ -101,6 +101,10 @@ export async function createBillAtomic(shopCode, billData) {
   return assignedBillNo;
 }
 
+export async function updateBill(shopCode, billId, updates) {
+  await updateDoc(doc(db, "shops", shopCode, "bills", billId), updates);
+}
+
 // ---------- Customer directory (for name -> phone autofill) ----------
 function customerDocId(name) {
   const slug = (name || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");

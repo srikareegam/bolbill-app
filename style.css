@@ -228,6 +228,28 @@ input:focus, select:focus{ border-color: var(--accent); }
 .parsed-row .field{ flex:1; }
 .heard-text{ font-family:var(--mono); font-size:12.5px; background:var(--accent-soft); color:var(--accent-dark); padding:8px 10px; border-radius:10px; margin-bottom:12px; }
 
+/* ---------- Bill edit (history) ---------- */
+.edit-item-row{ display:flex; align-items:center; gap:6px; padding:8px 2px; border-bottom:1px dashed var(--line); }
+.edit-item-row:last-child{ border-bottom:none; }
+.edit-item-row .ei-name{ flex:1; min-width:0; font-size:13.5px; padding:8px 9px; }
+.edit-item-row .ei-qty, .edit-item-row .ei-price{ width:54px; text-align:center; font-size:13px; padding:8px 4px; flex-shrink:0; }
+.edit-item-row .ei-x{ color:var(--ink-soft); font-size:12px; flex-shrink:0; }
+.edit-item-row .ei-del{
+  width:26px; height:26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger);
+  font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+
+/* ---------- Quick calculator ---------- */
+.calc-display{ background: var(--ink); color:#fff; border-radius:14px; padding:14px 16px; margin-bottom:14px; text-align:right; }
+.calc-expr{ font-family:var(--mono); font-size:15px; color:#CFC8B8; min-height:18px; word-break:break-all; }
+.calc-amt{ font-family:var(--mono); font-size:30px; font-weight:700; margin-top:4px; }
+.calc-pad{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px; }
+.calc-pad button{ font-family:var(--sans); font-size:19px; font-weight:700; padding:16px 0; border-radius:14px; border:none; background:var(--paper-panel); color:var(--ink); box-shadow:0 2px 6px rgba(34,31,26,0.08); cursor:pointer; }
+.calc-pad button:active{ background:var(--accent-soft); }
+.calc-pad .calc-op{ background:var(--accent-soft); color:var(--accent-dark); }
+.calc-pad .calc-x{ background:var(--accent); color:#fff; }
+.calc-pad .calc-zero{ grid-column: span 2; }
+
 /* ---------- Toast ---------- */
 #toast{
   position:fixed; left:50%; bottom:130px; transform:translateX(-50%) translateY(20px);
