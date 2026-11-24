@@ -16,6 +16,40 @@
   .edit-banner{ display:none; align-items:center; justify-content:space-between; gap:10px; background:var(--accent-soft); color:var(--accent-dark); border-radius:12px; padding:10px 12px; font-size:13px; font-weight:600; margin-bottom:12px; }
   .edit-banner.show{ display:flex; }
   .sticker-preview img{ cursor:zoom-in; }
+  /* ---- photo reading progress ---- */
+  .spinner.dark{ border-color:rgba(15,107,82,0.22); border-top-color:var(--accent); flex-shrink:0; }
+  .load-line{ display:flex; align-items:center; gap:10px; margin-top:12px; font-size:13px; font-weight:600; color:var(--ink-soft); }
+  .scan-panel{ display:none; margin-top:12px; }
+  .scan-panel.show{ display:block; }
+  .scan-visual{ display:none; position:relative; height:170px; border-radius:12px; overflow:hidden; margin-bottom:12px; background:#ddd; }
+  .scan-visual.show{ display:block; }
+  .scan-visual img{ width:100%; height:100%; object-fit:cover; object-position:top; display:block; filter:saturate(0.85); }
+  .scan-line{ position:absolute; left:0; right:0; height:46px; top:-46px;
+    background:linear-gradient(180deg, rgba(15,107,82,0) 0%, rgba(15,107,82,0.35) 70%, rgba(15,107,82,0.9) 100%);
+    border-bottom:2px solid #3FD3A2; animation: scanmove 1.8s ease-in-out infinite alternate; }
+  @keyframes scanmove{ from{ top:-46px; } to{ top:calc(100% - 46px); } }
+  .scan-step{ display:flex; align-items:center; gap:10px; padding:6px 2px; font-size:13.5px; color:var(--ink-faint); }
+  .scan-step .st-icon{ width:20px; height:20px; flex-shrink:0; border-radius:50%; border:2px solid var(--line-strong); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:#fff; }
+  .scan-step .st-text{ flex:1; }
+  .scan-step .st-time{ font-family:var(--mono); font-size:11.5px; color:var(--ink-soft); }
+  .scan-step.active{ color:var(--ink); font-weight:600; }
+  .scan-step.active .st-icon{ border-color:rgba(15,107,82,0.22); border-top-color:var(--accent); animation: spin 0.7s linear infinite; }
+  .scan-step.done{ color:var(--ink-soft); }
+  .scan-step.done .st-icon{ background:var(--accent); border-color:var(--accent); }
+  .scan-step.done .st-icon::after{ content:"✓"; }
+  .scan-step.fail{ color:var(--danger); font-weight:600; }
+  .scan-step.fail .st-icon{ background:var(--danger); border-color:var(--danger); }
+  .scan-step.fail .st-icon::after{ content:"!"; }
+  .scan-step.skip .st-icon{ border-style:dashed; }
+  .scan-result{ display:none; margin-top:8px; border-radius:12px; padding:11px 13px; font-size:13px; line-height:1.55; }
+  .scan-result.show{ display:block; }
+  .scan-result.ok{ background:var(--accent-soft); color:var(--accent-dark); }
+  .scan-result.warn{ background:#FBF0D9; color:#7A5410; }
+  .scan-result b{ font-weight:700; }
+  .scan-result ul{ margin:6px 0 0; padding-left:18px; }
+  .scan-result a{ text-decoration:underline; font-weight:700; }
+  /* fields the photo filled in stay tinted until the user touches them */
+  input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
   input.big-total{ font-family:var(--mono); font-size:22px; font-weight:700; text-align:right; padding:12px 14px; }
   .money-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-family:var(--mono); font-size:13.5px; color:var(--ink-soft); padding:4px 0; }
   .money-row input{ width:130px; text-align:right; font-family:var(--mono); padding:8px 10px; font-size:15px; }
@@ -84,9 +118,16 @@
         </div>
         <button class="sp-clear" id="photoClear" title="Remove photo">✕</button>
       </div>
-      <div class="progress-label" id="scanStatus" style="display:none;"></div>
-      <div class="error-msg" id="scanWarn" style="display:none; margin:12px 0 0;"></div>
-      <div class="hint" id="noKeyHint" style="display:none; margin-top:10px;">To fill these in from the photo automatically, set up the free Gemini key on the <a href="orders.html" style="text-decoration:underline;">Orders</a> page.</div>
+      <!-- simple one-line status (used when opening a saved purchase's photo) -->
+      <div class="load-line" id="scanStatus" style="display:none;"><span class="spinner dark"></span><span id="scanStatusText"></span></div>
+
+      <!-- step-by-step progress while a new photo is prepared and read -->
+      <div class="scan-panel" id="scanPanel">
+        <div class="scan-visual" id="scanVisual"><img id="scanImg" src="" alt=""><div class="scan-line"></div></div>
+        <div class="scan-step" id="stepPrep"><span class="st-icon"></span><span class="st-text">Getting the photo ready</span></div>
+        <div class="scan-step" id="stepRead"><span class="st-icon"></span><span class="st-text" id="stepReadText">Reading supplier, invoice no., date &amp; total</span><span class="st-time" id="readTimer"></span></div>
+        <div class="scan-result" id="scanResult"></div>
+      </div>
     </div>
 
     <div class="section-label">Supplier</div>
@@ -358,11 +399,53 @@ if (shop) {
     $("photoPreview").classList.toggle("show", !!b64);
     $("photoPick").style.display = b64 ? "none" : "block";
   }
-  function setBusy(on, msg){
+  const saveLabel = () => editingId ? "💾 Save changes" : "💾 Save purchase";
+  // While a photo is being prepared/read the Save button says so, instead of just going grey.
+  function setBusy(on, btnText = "⏳ Wait — reading the photo…"){
     busy = on;
-    $("scanStatus").style.display = on ? "block" : "none";
-    $("scanStatus").textContent = msg || "";
     $("btnSave").disabled = on;
+    $("btnSave").textContent = on ? btnText : saveLabel();
+  }
+  function setLoadLine(msg){
+    $("scanStatus").style.display = msg ? "flex" : "none";
+    $("scanStatusText").textContent = msg || "";
+  }
+
+  // ---------- Step-by-step progress panel ----------
+  let readTimer = null;
+  function setStep(id, state){ $(id).className = "scan-step" + (state ? " " + state : ""); }
+  function resetScanPanel(){
+    stopReadTimer();
+    $("scanPanel").classList.remove("show");
+    $("scanVisual").classList.remove("show");
+    $("scanResult").className = "scan-result";
+    $("scanResult").innerHTML = "";
+    $("stepReadText").textContent = "Reading supplier, invoice no., date & total";
+    setStep("stepPrep", ""); setStep("stepRead", "");
+  }
+  function showScanResult(kind, html){
+    $("scanResult").className = "scan-result show " + kind;
+    $("scanResult").innerHTML = html;
+  }
+  function startReadTimer(){
+    const started = Date.now();
+    $("readTimer").textContent = "0s";
+    readTimer = setInterval(() => {
+      const s = Math.round((Date.now() - started) / 1000);
+      $("readTimer").textContent = s + "s";
+      if (s === 25) $("stepReadText").textContent = "Still reading — slow internet? Please wait";
+    }, 1000);
+  }
+  function stopReadTimer(){ clearInterval(readTimer); readTimer = null; $("readTimer").textContent = ""; }
+
+  // Turn technical errors into something a shopkeeper can act on.
+  function friendlyReadError(e){
+    const m = String((e && e.message) || "");
+    if (!navigator.onLine || /failed to fetch|network/i.test(m)) return "No internet connection, so the photo couldn't be read.";
+    if (/daily free limit/i.test(m)) return "The free daily reading limit is used up — it resets tomorrow.";
+    if (/api key/i.test(m)) return "The Gemini key isn't working. Check it on the <a href=\"orders.html\">Orders</a> page.";
+    if (e instanceof SyntaxError) return "The photo couldn't be understood — try a clearer, straight photo in good light.";
+    return "The photo couldn't be read this time.";
   }
 
   // Camera and gallery inputs share one handler.
@@ -373,38 +456,60 @@ if (shop) {
     input.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")){ toast("Please pick a photo"); return; }
-    $("scanWarn").style.display = "none";
-    setBusy(true, "Preparing photo…");
+    resetScanPanel();
+    $("scanPanel").classList.add("show");
+    setStep("stepPrep", "active");
+    setBusy(true);
     let b64;
     try{
       b64 = await compressForStorage(file);
     }catch(e){
       console.error(e);
+      setStep("stepPrep", "fail");
+      setStep("stepRead", "skip");
+      showScanResult("warn", escapeHtml(e.message || "Couldn't open this photo.") + " Try taking it again.");
       setBusy(false);
-      $("scanWarn").textContent = e.message || "Couldn't open this photo.";
-      $("scanWarn").style.display = "block";
       return;
     }
+    setStep("stepPrep", "done");
     showPhoto(b64);
     photoChanged = true;
+
     const key = settings.geminiKey && settings.geminiKey.trim();
-    $("noKeyHint").style.display = key ? "none" : "block";
-    if (key){
-      setBusy(true, "Reading invoice… (5–20 seconds)");
-      try{
-        applyScan(geminiJson(await callGemini(key, b64, INVOICE_PROMPT)));
-      }catch(e){
-        console.error(e);
-        $("scanWarn").textContent = "Couldn't read the invoice — fill in the details yourself. (" + e.message + ")";
-        $("scanWarn").style.display = "block";
-      }
+    if (!key){
+      setStep("stepRead", "skip");
+      $("stepReadText").textContent = "Auto-reading is off";
+      showScanResult("warn", `The photo will be saved with this purchase. Type the supplier and total below.<br>To fill them in automatically next time, set up the free Gemini key on the <a href="orders.html">Orders</a> page.`);
+      setBusy(false);
+      return;
     }
+    setStep("stepRead", "active");
+    $("scanImg").src = imgSrc(b64);
+    $("scanVisual").classList.add("show");
+    $("photoPreview").classList.remove("show");   // the big scanning copy replaces the small thumbnail meanwhile
+    startReadTimer();
+    try{
+      const found = applyScan(geminiJson(await callGemini(key, b64, INVOICE_PROMPT)));
+      setStep("stepRead", "done");
+      if (found.length){
+        showScanResult("ok", `<b>Found on the invoice — please check:</b><ul>${found.map(f => `<li>${f}</li>`).join("")}</ul>`);
+      } else {
+        showScanResult("warn", "Couldn't find the supplier or total on this photo. Type them below, or retake a clearer photo.");
+      }
+    }catch(e){
+      console.error(e);
+      setStep("stepRead", "fail");
+      showScanResult("warn", `${friendlyReadError(e)} The photo is still attached — type the supplier and total below.`);
+    }
+    stopReadTimer();
+    $("scanVisual").classList.remove("show");
+    $("photoPreview").classList.toggle("show", !!photoB64);
     setBusy(false);
   }
   $("photoClear").onclick = () => {
     showPhoto(null);
     photoChanged = true;
-    $("noKeyHint").style.display = "none";
+    resetScanPanel();
   };
   $("photoThumb").onclick = () => openViewer(photoB64);
 
@@ -427,33 +532,50 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
 {"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0}`;
 
   // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
+  // Returns one line per filled field for the "Found on the invoice" box; filled inputs get tinted.
   function applyScan(parsed){
-    const filled = [];
+    const found = [];
+    const fill = (id, value) => { $(id).value = value; $(id).classList.add("autofilled"); };
     const sup = parsed.supplier || {};
     scannedSupplierExtras = { phone: sup.phone || "", gstin: sup.gstin || "" };
+    let newSupplierName = "";
     if (sup.name && !selectedSupplier && !$("supName").value.trim()){
       const n = sup.name.trim().toLowerCase();
       const match = findSupplierByName(sup.name)
         || suppliers.find(s => s.name && ((s.name.toLowerCase().includes(n)) || n.includes(s.name.toLowerCase())))
         || (sup.gstin && suppliers.find(s => s.gstin && s.gstin.toUpperCase() === sup.gstin.toUpperCase()));
-      if (match){ selectedSupplier = { id: match.id, name: match.name }; $("supName").value = match.name; }
-      else $("supName").value = sup.name.trim();
-      filled.push("supplier");
+      if (match){
+        selectedSupplier = { id: match.id, name: match.name };
+        fill("supName", match.name);
+        found.push(`Supplier: <b>${escapeHtml(match.name)}</b>`);
+      } else {
+        newSupplierName = sup.name.trim();
+        fill("supName", newSupplierName);
+        found.push(`Supplier: <b>${escapeHtml(newSupplierName)}</b> — new, tap “+ Add” under the name to save it`);
+      }
     }
-    if (parsed.invoiceNo && !$("invNo").value.trim()){ $("invNo").value = String(parsed.invoiceNo); filled.push("invoice no."); }
+    if (parsed.invoiceNo && !$("invNo").value.trim()){
+      fill("invNo", String(parsed.invoiceNo));
+      found.push(`Invoice no.: <b>${escapeHtml(parsed.invoiceNo)}</b>`);
+    }
     if (/^\d{4}-\d{2}-\d{2}$/.test(parsed.invoiceDate || "") && parsed.invoiceDate <= todayKey() && !editingId){
-      $("invDate").value = parsed.invoiceDate; filled.push("date");
+      fill("invDate", parsed.invoiceDate);
+      found.push(`Date: <b>${fmtDate(parsed.invoiceDate)}</b>`);
     }
     const total = r2(String(parsed.total ?? "").replace(/[^\d.]/g, ""));
-    if (total > 0 && !(r2($("totalIn").value) > 0)){ $("totalIn").value = total; filled.push("total"); }
+    if (total > 0 && !(r2($("totalIn").value) > 0)){
+      fill("totalIn", total);
+      found.push(`Total: <b>${rupee(total)}</b>`);
+    }
     renderPay();
-    if (filled.length) toast(`Filled ${filled.join(", ")} — check before saving`);
-    else toast("Couldn't find new details on the photo");
-    if (!selectedSupplier && $("supName").value.trim()){
+    if (newSupplierName){
       $("supName").focus();
       renderSupplierSuggestions();   // offers "+ Add as new supplier"
     }
+    return found;
   }
+  // The tint means "came from the photo — check me"; it goes away once the user edits the field.
+  ["supName", "invNo", "invDate", "totalIn"].forEach(id => $(id).addEventListener("input", () => $(id).classList.remove("autofilled")));
 
   // ---------- Form reset / load ----------
   function resetForm(){
@@ -464,10 +586,11 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     showPhoto(null);
     ["supName", "invNo", "totalIn", "splitCash", "splitUpi", "noteIn"].forEach(id => $(id).value = "");
     $("invDate").value = todayKey();
-    $("scanWarn").style.display = "none";
-    $("noKeyHint").style.display = "none";
+    ["supName", "invNo", "invDate", "totalIn"].forEach(id => $(id).classList.remove("autofilled"));
+    resetScanPanel();
+    setLoadLine("");
     $("editBanner").classList.remove("show");
-    $("btnSave").textContent = "💾 Save purchase";
+    $("btnSave").textContent = saveLabel();
     $("btnDelete").style.display = "none";
     setPayMode("cash");
   }
@@ -494,11 +617,13 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     showTab("new");
     if (p.hasPhoto){
       const loadingFor = p.id;
-      setBusy(true, "Loading invoice photo…");
+      setBusy(true, "⏳ Loading photo…");
+      setLoadLine("Loading the invoice photo…");
       try{
         const b64 = await getPurchasePhoto(shop.shopCode, p.id);
         if (editingId === loadingFor && !photoChanged) showPhoto(b64);
       }catch(e){ console.error(e); toast("Couldn't load the photo — check your connection"); }
+      setLoadLine("");
       setBusy(false);
     }
   }
