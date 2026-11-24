@@ -63,11 +63,18 @@
     </div>
 
     <div class="card">
-      <div class="dropzone" id="dropzone">
-        <input type="file" id="photoInput" accept="image/*">
-        <div class="dz-glyph">📷</div>
-        <div class="dz-main">Photograph the invoice</div>
-        <div class="dz-sub">or tap to pick from gallery — supplier &amp; total fill in automatically</div>
+      <div id="photoPick">
+        <!-- capture="environment" opens the phone's back camera straight away -->
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="photoInput" accept="image/*" capture="environment">
+          <div class="dz-glyph">📷</div>
+          <div class="dz-main">Take a photo of the invoice</div>
+          <div class="dz-sub">Opens the camera — supplier &amp; total fill in automatically</div>
+        </div>
+        <label class="icon-btn" style="display:block; text-align:center; margin-top:10px; cursor:pointer;">
+          🖼 Choose from gallery instead
+          <input type="file" id="galleryInput" accept="image/*" style="display:none;">
+        </label>
       </div>
       <div class="sticker-preview" id="photoPreview" style="margin-top:0;">
         <img id="photoThumb" src="" alt="Invoice photo" title="Tap to view full size">
@@ -349,7 +356,7 @@ if (shop) {
       $("photoSize").textContent = sizeNote || `${Math.round(b64.length * 3 / 4 / 1024)} KB · tap photo to view`;
     }
     $("photoPreview").classList.toggle("show", !!b64);
-    $("dropzone").style.display = b64 ? "none" : "block";
+    $("photoPick").style.display = b64 ? "none" : "block";
   }
   function setBusy(on, msg){
     busy = on;
@@ -358,9 +365,12 @@ if (shop) {
     $("btnSave").disabled = on;
   }
 
-  $("photoInput").onchange = async () => {
-    const file = $("photoInput").files[0];
-    $("photoInput").value = "";
+  // Camera and gallery inputs share one handler.
+  $("photoInput").onchange = () => handlePhotoInput($("photoInput"));
+  $("galleryInput").onchange = () => handlePhotoInput($("galleryInput"));
+  async function handlePhotoInput(input){
+    const file = input.files[0];
+    input.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")){ toast("Please pick a photo"); return; }
     $("scanWarn").style.display = "none";
@@ -390,7 +400,7 @@ if (shop) {
       }
     }
     setBusy(false);
-  };
+  }
   $("photoClear").onclick = () => {
     showPhoto(null);
     photoChanged = true;
