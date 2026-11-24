@@ -233,8 +233,7 @@ input:focus, select:focus{ border-color: var(--accent); }
 .edit-item-row:last-child{ border-bottom:none; }
 .edit-item-row .ei-name{ flex:1; min-width:0; font-size:13.5px; padding:8px 9px; }
 .edit-item-row .ei-qty, .edit-item-row .ei-price{ width:54px; text-align:center; font-size:13px; padding:8px 4px; flex-shrink:0; }
-.edit-item-row .ei-x{ color:var(--ink-soft); font-size:12px; flex-shrink:0; }
-.edit-item-row .ei-del{
+.edit-item-row .ei-x{ color:var(--ink-soft); font-size:12px; flex-shrink:0; }.edit-item-row .ei-del{
   width:26px; height:26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger);
   font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer;
 }

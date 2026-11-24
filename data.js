@@ -1,9 +1,9 @@
 // Shared data layer used by every page. Handles Shop Code + PIN, and all Firestore reads/writes.
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc,
+  getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
   collection, onSnapshot, query, orderBy, where, getDocs,
-  serverTimestamp, runTransaction
+  serverTimestamp, runTransaction, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -103,6 +103,94 @@ export async function createBillAtomic(shopCode, billData) {
 
 export async function updateBill(shopCode, billId, updates) {
   await updateDoc(doc(db, "shops", shopCode, "bills", billId), updates);
+}
+
+// ---------- Suppliers, purchases & supplier payments ----------
+// Supplier balances are never stored — pages compute them from purchases and payments,
+// so editing or deleting a purchase can't leave a stale balance behind.
+function subscribeCol(shopCode, name, cb, sortField) {
+  const col = collection(db, "shops", shopCode, name);
+  const q = sortField ? query(col, orderBy(sortField, "desc")) : col;
+  return onSnapshot(q, (snap) => {
+    const rows = [];
+    snap.forEach(d => rows.push(Object.assign({ id: d.id }, d.data())));
+    cb(rows);
+  });
+}
+export function subscribeSuppliers(shopCode, cb) {
+  return subscribeCol(shopCode, "suppliers", (rows) => {
+    rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    cb(rows);
+  });
+}
+export async function addSupplier(shopCode, { name, phone = "", gstin = "" }) {
+  const ref = await addDoc(collection(db, "shops", shopCode, "suppliers"),
+    { name: name.trim(), phone: phone.trim(), gstin: gstin.trim(), createdAt: serverTimestamp() });
+  return ref.id;
+}
+export async function updateSupplier(shopCode, supplierId, fields) {
+  await updateDoc(doc(db, "shops", shopCode, "suppliers", supplierId), fields);
+}
+
+export function subscribePurchases(shopCode, cb) {
+  return subscribeCol(shopCode, "purchases", cb, "invoiceDate");
+}
+// Invoice photos live in their own collection (same id as the purchase) so the purchase
+// list stays small — a photo is only downloaded when that purchase is opened.
+// Purchase + photo are written in one batch: both save, or neither does.
+const photoRef = (shopCode, purchaseId) => doc(db, "shops", shopCode, "purchasePhotos", purchaseId);
+
+export async function createPurchase(shopCode, data, photoB64) {
+  const ref = doc(collection(db, "shops", shopCode, "purchases"));
+  const batch = writeBatch(db);
+  batch.set(ref, Object.assign({}, data, { hasPhoto: !!photoB64, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  if (photoB64) batch.set(photoRef(shopCode, ref.id), { data: photoB64, createdAt: serverTimestamp() });
+  await batch.commit();
+  return ref.id;
+}
+// photoB64: a new photo to replace the old one, null to remove the photo,
+// or undefined to leave the photo as it is.
+export async function updatePurchase(shopCode, purchaseId, data, photoB64) {
+  const batch = writeBatch(db);
+  const fields = Object.assign({}, data, { updatedAt: serverTimestamp() });
+  if (photoB64) {
+    fields.hasPhoto = true;
+    batch.set(photoRef(shopCode, purchaseId), { data: photoB64, createdAt: serverTimestamp() });
+  } else if (photoB64 === null) {
+    fields.hasPhoto = false;
+    batch.delete(photoRef(shopCode, purchaseId));
+  }
+  batch.update(doc(db, "shops", shopCode, "purchases", purchaseId), fields);
+  await batch.commit();
+}
+export async function deletePurchase(shopCode, purchaseId) {
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "shops", shopCode, "purchases", purchaseId));
+  batch.delete(photoRef(shopCode, purchaseId));
+  await batch.commit();
+}
+export async function getPurchasePhoto(shopCode, purchaseId) {
+  const snap = await getDoc(photoRef(shopCode, purchaseId));
+  return snap.exists() ? snap.data().data : null;
+}
+
+export function subscribeSupplierPayments(shopCode, cb) {
+  return subscribeCol(shopCode, "supplierPayments", cb, "date");
+}
+export async function addSupplierPayment(shopCode, data) {
+  await addDoc(collection(db, "shops", shopCode, "supplierPayments"),
+    Object.assign({}, data, { createdAt: serverTimestamp() }));
+}
+export async function deleteSupplierPayment(shopCode, paymentId) {
+  await deleteDoc(doc(db, "shops", shopCode, "supplierPayments", paymentId));
+}
+
+// Amount still owed to each supplier: sum of (total - paidNow) on purchases minus later payments.
+export function computeSupplierBalances(purchases, payments) {
+  const bal = {};
+  purchases.forEach(p => { bal[p.supplierId] = (bal[p.supplierId] || 0) + (p.total || 0) - (p.paidNow || 0); });
+  payments.forEach(p => { bal[p.supplierId] = (bal[p.supplierId] || 0) - (p.amount || 0); });
+  return bal;
 }
 
 // ---------- Customer directory (for name -> phone autofill) ----------

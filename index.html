@@ -71,6 +71,7 @@
   <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
   <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
   <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
+  <a class="nav-item" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
   <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
   <a class="nav-item" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
   <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
@@ -111,29 +112,6 @@
   </div>
 </div>
 
-<!-- Quick calculator -->
-<div class="modal-backdrop hidden" id="modalCalc">
-  <div class="modal">
-    <div class="modal-title">Quick Calculator</div>
-    <div class="modal-sub">Type qty, tap ×, type price — add each item, then print</div>
-    <div class="field"><label>Item name (optional)</label><input type="text" id="c-name" placeholder="e.g. Sugar"></div>
-    <div class="calc-display">
-      <div class="calc-expr" id="calcExpr">0</div>
-      <div class="calc-amt" id="calcAmt">₹0.00</div>
-    </div>
-    <div class="calc-pad" id="calcPad">
-      <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button><button type="button" class="calc-op" data-k="back">⌫</button>
-      <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button><button type="button" class="calc-op" data-k="clear">C</button>
-      <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button><button type="button" class="calc-op calc-x" data-k="x">×</button>
-      <button type="button" data-k=".">.</button><button type="button" class="calc-zero" data-k="0">0</button>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="btnCalcClose">Close</button>
-      <button class="btn btn-primary" id="btnCalcAdd">+ Add item</button>
-    </div>
-    <button class="btn btn-print btn-full" id="btnCalcAddPrint" style="margin-top:10px;">🖨 Add &amp; Print Bill</button>
-  </div>
-</div>
 
 <!-- WhatsApp confirm -->
 <div class="modal-backdrop hidden" id="modalWaConfirm">
@@ -179,6 +157,7 @@
 
 <script type="module">
 import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer } from "./data.js";
+import { mountCalculator } from "./calc.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -337,67 +316,24 @@ if (shop) {
   };
   $("btnCancelManual").onclick = () => { editingItemId = null; $("modalManual").classList.add("hidden"); };
 
-  // ---------- Quick calculator ----------
-  let calcStage = "qty", calcQty = "", calcPrice = "";
-  function calcUpdateDisplay(){
-    let expr = calcQty || "0";
-    if(calcStage === "price") expr += " × " + (calcPrice || "0");
-    $("calcExpr").textContent = expr;
-    $("calcAmt").textContent = rupee((parseFloat(calcQty)||0) * (parseFloat(calcPrice)||0));
-  }
-  function calcDigit(d){
-    const cur = calcStage === "qty" ? calcQty : calcPrice;
-    if(d === "." && cur.includes(".")) return;
-    if(calcStage === "qty") calcQty += d; else calcPrice += d;
-    calcUpdateDisplay();
-  }
-  function calcBackspace(){
-    if(calcStage === "price"){
-      if(calcPrice) calcPrice = calcPrice.slice(0,-1);
-      else calcStage = "qty";
-    } else {
-      calcQty = calcQty.slice(0,-1);
-    }
-    calcUpdateDisplay();
-  }
-  function calcClear(){ calcStage = "qty"; calcQty = ""; calcPrice = ""; calcUpdateDisplay(); }
-  function calcTimes(){ if(calcStage === "qty" && calcQty) { calcStage = "price"; calcUpdateDisplay(); } }
-  document.querySelectorAll("#calcPad button").forEach(btn => {
-    btn.onclick = () => {
-      const k = btn.dataset.k;
-      if(k === "back") calcBackspace();
-      else if(k === "clear") calcClear();
-      else if(k === "x") calcTimes();
-      else calcDigit(k);
-    };
-  });
-  function calcBuildItem(){
-    const qty = parseFloat(calcQty) || 0;
-    const price = parseFloat(calcPrice) || 0;
-    if(qty <= 0 || price <= 0) return null;
-    const name = $("c-name").value.trim() || "Item";
-    return { id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price };
-  }
-  $("btnCalcOpen").onclick = () => { calcClear(); $("c-name").value = ""; $("modalCalc").classList.remove("hidden"); };
-  $("btnCalcClose").onclick = () => { $("modalCalc").classList.add("hidden"); };
-  $("btnCalcAdd").onclick = () => {
-    const it = calcBuildItem();
-    if(!it){ toast("Enter qty and price"); return; }
-    items.push(it);
+  // ---------- Quick calculator (calc.js) ----------
+  const pushCalcItem = (it) => {
+    items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(it.name || "Item"), qty: it.qty, price: it.price });
     renderItems();
-    toast(it.name + " added");
-    calcClear();
-    $("c-name").value = "";
   };
-  $("btnCalcAddPrint").onclick = () => {
-    const it = calcBuildItem();
-    if(it){ items.push(it); renderItems(); }
-    if(items.length === 0){ toast("Add at least one item first"); return; }
-    $("modalCalc").classList.add("hidden");
-    calcClear();
-    $("c-name").value = "";
-    saveBill({ alsoPrint: true });
-  };
+  const calc = mountCalculator({
+    sub: "Type qty, tap ×, type price — add each item, then print",
+    finishLabel: "🖨 Add & Print Bill",
+    toast,
+    onAdd: pushCalcItem,
+    onFinish: (it) => {
+      if(it) pushCalcItem(it);
+      if(items.length === 0){ toast("Add at least one item first"); return false; }
+      saveBill({ alsoPrint: true });
+      return true;
+    }
+  });
+  $("btnCalcOpen").onclick = () => calc.open();
 
   // ---------- Voice ----------
   let recognition = null, listening = false;

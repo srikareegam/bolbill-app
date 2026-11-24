@@ -19,6 +19,15 @@ service cloud.firestore {
       match /bills/{billId} {
         allow read, write: if true;
       }
+      match /suppliers/{supplierId} {
+        allow read, write: if true;
+      }
+      match /purchases/{purchaseId} {
+        allow read, write: if true;
+      }
+      match /supplierPayments/{paymentId} {
+        allow read, write: if true;
+      }
     }
   }
 }

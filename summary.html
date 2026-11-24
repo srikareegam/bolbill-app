@@ -29,6 +29,14 @@
     </div>
   </div>
 
+  <div class="section-label">Purchases</div>
+  <a class="card" href="purchases.html" style="display:block;">
+    <div class="totals-line"><span>Bought this day</span><span class="amt" id="purTotal">₹0.00</span></div>
+    <div class="totals-line"><span>Paid to suppliers — cash</span><span class="amt" id="purPaidCash">₹0.00</span></div>
+    <div class="totals-line"><span>Paid to suppliers — UPI</span><span class="amt" id="purPaidUpi">₹0.00</span></div>
+    <div class="totals-line grand"><span>Owed to suppliers</span><span class="amt" id="purOwed" style="color:var(--danger);">₹0.00</span></div>
+  </a>
+
   <div class="section-label">Top selling items</div>
   <div class="card" id="topItemsCard">
     <div class="history-empty">No sales this day</div>
@@ -40,13 +48,14 @@
   <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
   <a class="nav-item active" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
   <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
+  <a class="nav-item" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
   <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
   <a class="nav-item" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
   <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
 </nav>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeBills } from "./data.js";
+import { requireShopOrRedirect, subscribeBills, subscribePurchases, subscribeSupplierPayments, computeSupplierBalances, todayKey } from "./data.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -55,11 +64,30 @@ if (shop) {
   function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
   let allBills = [];
-  const todayStr = new Date().toISOString().slice(0,10);
+  const todayStr = todayKey(); // local date — toISOString() is UTC and showed yesterday before 5:30 AM IST
   $("dayPicker").value = todayStr;
 
+  let purchases = [], supplierPayments = [];
   subscribeBills(shop.shopCode, (bills) => { allBills = bills; render(); });
-  $("dayPicker").onchange = render;
+  subscribePurchases(shop.shopCode, (rows) => { purchases = rows; renderPurchases(); });
+  subscribeSupplierPayments(shop.shopCode, (rows) => { supplierPayments = rows; renderPurchases(); });
+  $("dayPicker").onchange = () => { render(); renderPurchases(); };
+
+  function renderPurchases(){
+    const day = $("dayPicker").value || todayStr;
+    const dayPurchases = purchases.filter(p => p.invoiceDate === day);
+    const bought = dayPurchases.reduce((s, p) => s + (p.total || 0), 0);
+    // money that left the shop this day, by mode: paid at purchase time + later payments to suppliers
+    const dayPayments = supplierPayments.filter(p => p.date === day);
+    const paidBy = (mode) =>
+      dayPurchases.reduce((s, p) => s + ((p.pay && p.pay[mode]) || 0), 0)
+      + dayPayments.filter(p => p.payMode === mode).reduce((s, p) => s + (p.amount || 0), 0);
+    const owed = Object.values(computeSupplierBalances(purchases, supplierPayments)).reduce((s, b) => s + (b > 0 ? b : 0), 0);
+    $("purTotal").textContent = rupee(bought);
+    $("purPaidCash").textContent = rupee(paidBy("cash"));
+    $("purPaidUpi").textContent = rupee(paidBy("upi"));
+    $("purOwed").textContent = rupee(owed);
+  }
 
   function toDate(b){
     if (b.createdAt && b.createdAt.toDate) return b.createdAt.toDate();

@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Purchases</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .pur-sec{ display:none; }
+  .pur-sec.show{ display:block; }
+  .edit-banner{ display:none; align-items:center; justify-content:space-between; gap:10px; background:var(--accent-soft); color:var(--accent-dark); border-radius:12px; padding:10px 12px; font-size:13px; font-weight:600; margin-bottom:12px; }
+  .edit-banner.show{ display:flex; }
+  .sticker-preview img{ cursor:zoom-in; }
+  input.big-total{ font-family:var(--mono); font-size:22px; font-weight:700; text-align:right; padding:12px 14px; }
+  .money-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-family:var(--mono); font-size:13.5px; color:var(--ink-soft); padding:4px 0; }
+  .money-row input{ width:130px; text-align:right; font-family:var(--mono); padding:8px 10px; font-size:15px; }
+  .money-row b{ font-size:15px; color:var(--ink); }
+  .pay-summary{ font-family:var(--mono); font-size:13px; font-weight:600; color:var(--accent-dark); background:var(--accent-soft); border-radius:12px; padding:10px 12px; margin:10px 0 12px; }
+  .pay-summary.has-due{ color:var(--danger); background:var(--danger-soft); }
+  .pay-summary.error{ color:#fff; background:var(--danger); }
+  .due-tag{ font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--danger); margin-top:2px; text-align:right; }
+  .ok-tag{ font-family:var(--mono); font-size:11.5px; font-weight:600; color:var(--accent-dark); margin-top:2px; text-align:right; }
+  .ledger-row{ display:flex; align-items:center; gap:10px; padding:10px 2px; border-bottom:1px dashed var(--line); }
+  .ledger-row:last-child{ border-bottom:none; }
+  .ledger-row .lg-info{ flex:1; min-width:0; cursor:pointer; }
+  .ledger-row .lg-t1{ font-size:13.5px; font-weight:600; }
+  .ledger-row .lg-t2{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .ledger-row .lg-amt{ font-family:var(--mono); font-weight:700; font-size:13.5px; text-align:right; white-space:nowrap; }
+  .ledger-row .lg-bal{ font-family:var(--mono); font-size:11px; color:var(--ink-soft); }
+  .ledger-del{ width:26px; height:26px; border-radius:50%; border:none; background:var(--danger-soft); color:var(--danger); flex-shrink:0; cursor:pointer; }
+  /* full-screen invoice viewer */
+  .photo-viewer{ position:fixed; inset:0; z-index:150; background:#111; display:none; }
+  .photo-viewer.show{ display:block; }
+  .pv-scroll{ position:absolute; inset:0; overflow:auto; -webkit-overflow-scrolling:touch; }
+  .pv-scroll img{ display:block; width:100%; height:auto; cursor:zoom-in; }
+  .photo-viewer.actual .pv-scroll img{ width:auto; max-width:none; cursor:zoom-out; }
+  .pv-close{ position:absolute; top:calc(12px + env(safe-area-inset-top)); right:12px; z-index:2; width:42px; height:42px; border-radius:50%; border:2px solid rgba(255,255,255,0.85); background:rgba(0,0,0,0.75); color:#fff; font-size:18px; cursor:pointer; }
+  .pv-hint{ position:absolute; bottom:calc(14px + env(safe-area-inset-bottom)); left:0; right:0; text-align:center; color:#bbb; font-size:12px; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">Purchases</div>
+  <div class="page-sub">Supplier invoices, how you paid, and what you still owe</div>
+
+  <div class="tabbar">
+    <div class="tabbtn active" data-tab="new">New</div>
+    <div class="tabbtn" data-tab="history">History</div>
+    <div class="tabbtn" data-tab="suppliers">Suppliers</div>
+  </div>
+
+  <!-- ===== New / edit purchase ===== -->
+  <div class="pur-sec show" id="sec-new">
+    <div class="edit-banner" id="editBanner">
+      <span id="editBannerText">Editing purchase</span>
+      <button class="icon-btn" id="btnCancelEdit" style="color:var(--accent-dark);">Cancel</button>
+    </div>
+
+    <div class="card">
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="photoInput" accept="image/*">
+        <div class="dz-glyph">📷</div>
+        <div class="dz-main">Photograph the invoice</div>
+        <div class="dz-sub">or tap to pick from gallery — supplier &amp; total fill in automatically</div>
+      </div>
+      <div class="sticker-preview" id="photoPreview" style="margin-top:0;">
+        <img id="photoThumb" src="" alt="Invoice photo" title="Tap to view full size">
+        <div class="sp-info">
+          <div class="sp-name">Invoice photo</div>
+          <div class="sp-size" id="photoSize"></div>
+        </div>
+        <button class="sp-clear" id="photoClear" title="Remove photo">✕</button>
+      </div>
+      <div class="progress-label" id="scanStatus" style="display:none;"></div>
+      <div class="error-msg" id="scanWarn" style="display:none; margin:12px 0 0;"></div>
+      <div class="hint" id="noKeyHint" style="display:none; margin-top:10px;">To fill these in from the photo automatically, set up the free Gemini key on the <a href="orders.html" style="text-decoration:underline;">Orders</a> page.</div>
+    </div>
+
+    <div class="section-label">Supplier</div>
+    <div class="autocomplete-wrap">
+      <input type="text" id="supName" placeholder="Supplier name" autocomplete="off">
+      <div class="autocomplete-list hidden" id="supSuggestions"></div>
+    </div>
+    <div class="parsed-row" style="margin-top:8px;">
+      <div class="field"><label>Invoice no.</label><input type="text" id="invNo" placeholder="optional"></div>
+      <div class="field"><label>Invoice date</label><input type="date" id="invDate"></div>
+    </div>
+    <div class="field"><label>Invoice total ₹</label><input type="number" id="totalIn" class="big-total" inputmode="decimal" placeholder="0.00"></div>
+
+    <div class="section-label">Paid by</div>
+    <div class="filter-row" id="modeChips">
+      <div class="filter-chip active" data-mode="cash">Cash</div>
+      <div class="filter-chip" data-mode="upi">UPI</div>
+      <div class="filter-chip" data-mode="credit">Credit</div>
+      <div class="filter-chip" data-mode="split">Split</div>
+    </div>
+    <div class="card" id="splitCard" style="display:none;">
+      <div class="money-row"><span>Cash ₹</span><input type="number" id="splitCash" inputmode="decimal" placeholder="0"></div>
+      <div class="money-row"><span>UPI ₹</span><input type="number" id="splitUpi" inputmode="decimal" placeholder="0"></div>
+      <div class="money-row"><span>Credit (due) ₹</span><b id="splitCredit">0.00</b></div>
+    </div>
+    <div class="pay-summary" id="paySummary">Enter the invoice total</div>
+
+    <div class="field"><input type="text" id="noteIn" placeholder="Note (optional)"></div>
+    <button class="btn btn-primary btn-full" id="btnSave">💾 Save purchase</button>
+    <button class="btn btn-danger btn-full" id="btnDelete" style="margin-top:10px; display:none;">🗑 Delete purchase</button>
+  </div>
+
+  <!-- ===== History ===== -->
+  <div class="pur-sec" id="sec-history">
+    <div class="filter-row" id="histChips">
+      <div class="filter-chip active" data-f="today">Today</div>
+      <div class="filter-chip" data-f="week">This week</div>
+      <div class="filter-chip" data-f="month">This month</div>
+      <div class="filter-chip" data-f="all">All time</div>
+    </div>
+    <div class="money-row" style="margin:0 4px 10px;"><span id="histCount">0 purchases</span><span id="histTotal">₹0.00</span></div>
+    <div id="histList"></div>
+  </div>
+
+  <!-- ===== Suppliers ===== -->
+  <div class="pur-sec" id="sec-suppliers">
+    <div class="summary-hero">
+      <div class="label">Owed to all suppliers</div>
+      <div class="value" id="owedTotal">₹0.00</div>
+      <div class="summary-stats">
+        <div class="stat-box"><div class="n" id="statSuppliers">0</div><div class="l">Suppliers</div></div>
+        <div class="stat-box"><div class="n" id="statMonth">₹0</div><div class="l">Bought this month</div></div>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-full" id="btnNewSupplier" style="margin-bottom:12px;">+ Add supplier</button>
+    <div id="supList"></div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
+  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
+  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
+  <a class="nav-item active" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
+  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
+  <a class="nav-item" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
+  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+</nav>
+
+<!-- Full-screen invoice viewer -->
+<div class="photo-viewer" id="photoViewer">
+  <div class="pv-scroll" id="pvScroll"><img id="pvImg" src="" alt="Invoice"></div>
+  <button class="pv-close" id="pvClose">✕</button>
+  <div class="pv-hint">Tap the photo to zoom</div>
+</div>
+
+<!-- Add / edit supplier -->
+<div class="modal-backdrop hidden" id="modalSupplier">
+  <div class="modal">
+    <div class="modal-title" id="supModalTitle">New supplier</div>
+    <div class="modal-sub">Saved for every device on this shop</div>
+    <div class="field"><label>Name</label><input type="text" id="sm-name"></div>
+    <div class="parsed-row">
+      <div class="field"><label>Phone</label><input type="tel" id="sm-phone"></div>
+      <div class="field"><label>GSTIN</label><input type="text" id="sm-gstin" style="text-transform:uppercase;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="sm-cancel">Cancel</button>
+      <button class="btn btn-primary" id="sm-save">Save supplier</button>
+    </div>
+  </div>
+</div>
+
+<!-- Supplier account -->
+<div class="modal-backdrop hidden" id="modalLedger">
+  <div class="modal">
+    <div class="modal-title" id="lg-title">Supplier</div>
+    <div class="modal-sub" id="lg-sub"></div>
+    <div class="summary-hero" style="padding:14px 16px; margin-bottom:12px;">
+      <div class="label" id="lg-balLabel">Balance owed</div>
+      <div class="value" id="lg-bal" style="font-size:26px;">₹0.00</div>
+    </div>
+    <div class="btn-row" style="margin-bottom:12px;">
+      <button class="btn btn-secondary" id="lg-edit">✎ Edit supplier</button>
+      <button class="btn btn-primary" id="lg-pay">₹ Record payment</button>
+    </div>
+    <div class="card" id="lg-list" style="padding:4px 14px;"></div>
+    <button class="btn btn-ghost btn-full" id="lg-close" style="margin-top:12px;">Close</button>
+  </div>
+</div>
+
+<!-- Record supplier payment -->
+<div class="modal-backdrop hidden" id="modalPay">
+  <div class="modal">
+    <div class="modal-title">Record payment</div>
+    <div class="modal-sub" id="pay-sub"></div>
+    <div class="parsed-row">
+      <div class="field"><label>Amount ₹</label><input type="number" id="pay-amt" inputmode="decimal"></div>
+      <div class="field"><label>Date</label><input type="date" id="pay-date"></div>
+    </div>
+    <div class="filter-row" id="payModeChips">
+      <div class="filter-chip active" data-mode="cash">Cash</div>
+      <div class="filter-chip" data-mode="upi">UPI</div>
+    </div>
+    <div class="field"><input type="text" id="pay-note" placeholder="Note (optional)"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="pay-cancel">Cancel</button>
+      <button class="btn btn-primary" id="pay-save">Save payment</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import {
+  requireShopOrRedirect, subscribeSettings, todayKey,
+  subscribeSuppliers, addSupplier, updateSupplier,
+  subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
+  subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
+  computeSupplierBalances
+} from "./data.js";
+import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const rupee = (n) => "₹" + r2(n).toFixed(2);
+  const rupeeShort = (n) => "₹" + r2(n).toLocaleString("en-IN");
+  function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove("show"), 2400);
+  }
+  function fmtDate(key){
+    if (!key) return "";
+    const d = new Date(key + "T00:00:00");
+    const opts = { day:"2-digit", month:"short" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString("en-IN", opts);
+  }
+  const MODE_LABEL = { cash:"Cash", upi:"UPI", credit:"Credit", split:"Split" };
+  const imgSrc = (b64) => "data:image/jpeg;base64," + b64;
+
+  // "Cash ₹500 + UPI ₹300 + Credit ₹200", or just "Cash" when paid one way
+  function payLabel(p){
+    const pay = p.pay || {};
+    if (p.payMode !== "split") return MODE_LABEL[p.payMode] || "";
+    return [["Cash", pay.cash], ["UPI", pay.upi], ["Credit", pay.credit]]
+      .filter(([, v]) => v > 0).map(([k, v]) => `${k} ${rupeeShort(v)}`).join(" + ");
+  }
+  // what was paid at purchase time: "Cash ₹500 + UPI ₹300"
+  function paidParts(p){
+    const pay = p.pay || {};
+    return [["Cash", pay.cash], ["UPI", pay.upi]].filter(([, v]) => v > 0).map(([k, v]) => `${k} ${rupeeShort(v)}`).join(" + ");
+  }
+
+  let settings = {};
+  let suppliers = [], purchases = [], payments = [];
+  let balances = {};
+  let ledgerSupplierId = null;   // supplier whose account sheet is open
+  let histFilter = "today";
+  const supplierById = (id) => suppliers.find(s => s.id === id);
+  const supplierLabel = (p) => (supplierById(p.supplierId) || {}).name || p.supplierName || "Supplier";
+
+  subscribeSettings(shop.shopCode, (d) => { settings = d; });
+  subscribeSuppliers(shop.shopCode, (rows) => { suppliers = rows; refreshAll(); });
+  subscribePurchases(shop.shopCode, (rows) => {
+    // same-day purchases: newest entry first
+    const ms = (p) => (p.createdAt && p.createdAt.toMillis) ? p.createdAt.toMillis() : Date.now();
+    purchases = rows.sort((a,b) => (b.invoiceDate || "").localeCompare(a.invoiceDate || "") || ms(b) - ms(a));
+    refreshAll();
+  });
+  subscribeSupplierPayments(shop.shopCode, (rows) => { payments = rows; refreshAll(); });
+
+  function refreshAll(){
+    balances = computeSupplierBalances(purchases, payments);
+    renderHistory();
+    renderSuppliers();
+    if (ledgerSupplierId) renderLedger();
+  }
+
+  // ---------- Tabs ----------
+  function showTab(name){
+    document.querySelectorAll(".tabbar .tabbtn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll(".pur-sec").forEach(s => s.classList.toggle("show", s.id === "sec-" + name));
+    window.scrollTo(0, 0);
+  }
+  document.querySelectorAll(".tabbar .tabbtn").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+  function openModal(id){ $(id).classList.remove("hidden"); }
+  function closeModal(id){ $(id).classList.add("hidden"); }
+
+  // =====================================================================
+  // New / edit purchase
+  // =====================================================================
+  let editingId = null;           // purchase being edited, null for a new one
+  let selectedSupplier = null;    // { id, name }
+  let payMode = "cash";
+  let photoB64 = null;            // photo currently shown in the form
+  let photoChanged = false;       // in edit mode: photo replaced or removed since loading
+  let busy = false;               // compressing / reading a photo
+  let scannedSupplierExtras = {}; // phone/gstin read from the invoice, used to prefill "add supplier"
+
+  // ---------- Payment ----------
+  function computePay(){
+    const total = r2($("totalIn").value);
+    let cash = 0, upi = 0, credit = 0;
+    if (payMode === "cash") cash = total;
+    else if (payMode === "upi") upi = total;
+    else if (payMode === "credit") credit = total;
+    else { cash = r2($("splitCash").value); upi = r2($("splitUpi").value); credit = r2(total - cash - upi); }
+    let error = "";
+    if (cash < 0 || upi < 0) error = "Amounts can't be negative";
+    else if (credit < 0) error = `Cash + UPI is ${rupee(cash + upi)} — more than the ${rupee(total)} total`;
+    return { total, pay: { cash, upi, credit }, error };
+  }
+  function renderPay(){
+    const { total, pay, error } = computePay();
+    $("splitCard").style.display = payMode === "split" ? "block" : "none";
+    $("splitCredit").textContent = r2(Math.max(pay.credit, 0)).toFixed(2);
+    const box = $("paySummary");
+    box.classList.remove("has-due", "error");
+    if (error){ box.textContent = error; box.classList.add("error"); return; }
+    if (total <= 0){ box.textContent = "Enter the invoice total"; return; }
+    if (payMode === "credit"){ box.textContent = `Full ${rupee(total)} on credit — added to what you owe`; box.classList.add("has-due"); return; }
+    const paid = paidParts({ pay });
+    if (pay.credit > 0){ box.textContent = `${paid ? paid + " paid · " : ""}Due ${rupee(pay.credit)}`; box.classList.add("has-due"); }
+    else box.textContent = `${paid || "Paid"} · fully paid`;
+  }
+  function setPayMode(mode){
+    payMode = mode;
+    document.querySelectorAll("#modeChips .filter-chip").forEach(c => c.classList.toggle("active", c.dataset.mode === mode));
+    renderPay();
+  }
+  document.querySelectorAll("#modeChips .filter-chip").forEach(c => c.onclick = () => setPayMode(c.dataset.mode));
+  ["totalIn", "splitCash", "splitUpi"].forEach(id => $(id).oninput = renderPay);
+
+  // ---------- Photo ----------
+  function showPhoto(b64, sizeNote){
+    photoB64 = b64;
+    if (b64){
+      $("photoThumb").src = imgSrc(b64);
+      $("photoSize").textContent = sizeNote || `${Math.round(b64.length * 3 / 4 / 1024)} KB · tap photo to view`;
+    }
+    $("photoPreview").classList.toggle("show", !!b64);
+    $("dropzone").style.display = b64 ? "none" : "block";
+  }
+  function setBusy(on, msg){
+    busy = on;
+    $("scanStatus").style.display = on ? "block" : "none";
+    $("scanStatus").textContent = msg || "";
+    $("btnSave").disabled = on;
+  }
+
+  $("photoInput").onchange = async () => {
+    const file = $("photoInput").files[0];
+    $("photoInput").value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")){ toast("Please pick a photo"); return; }
+    $("scanWarn").style.display = "none";
+    setBusy(true, "Preparing photo…");
+    let b64;
+    try{
+      b64 = await compressForStorage(file);
+    }catch(e){
+      console.error(e);
+      setBusy(false);
+      $("scanWarn").textContent = e.message || "Couldn't open this photo.";
+      $("scanWarn").style.display = "block";
+      return;
+    }
+    showPhoto(b64);
+    photoChanged = true;
+    const key = settings.geminiKey && settings.geminiKey.trim();
+    $("noKeyHint").style.display = key ? "none" : "block";
+    if (key){
+      setBusy(true, "Reading invoice… (5–20 seconds)");
+      try{
+        applyScan(geminiJson(await callGemini(key, b64, INVOICE_PROMPT)));
+      }catch(e){
+        console.error(e);
+        $("scanWarn").textContent = "Couldn't read the invoice — fill in the details yourself. (" + e.message + ")";
+        $("scanWarn").style.display = "block";
+      }
+    }
+    setBusy(false);
+  };
+  $("photoClear").onclick = () => {
+    showPhoto(null);
+    photoChanged = true;
+    $("noKeyHint").style.display = "none";
+  };
+  $("photoThumb").onclick = () => openViewer(photoB64);
+
+  function openViewer(b64){
+    if (!b64) return;
+    $("pvImg").src = imgSrc(b64);
+    $("photoViewer").classList.remove("actual");
+    $("photoViewer").classList.add("show");
+    $("pvScroll").scrollTo(0, 0);
+  }
+  $("pvImg").onclick = () => $("photoViewer").classList.toggle("actual");
+  $("pvClose").onclick = () => $("photoViewer").classList.remove("show");
+
+  // ---------- Auto-fill from the invoice photo (Gemini) ----------
+  const INVOICE_PROMPT = `You are reading a supplier's purchase invoice / bill given to an Indian kirana (grocery) shop. It may be printed or handwritten and may mix Telugu and English.
+Extract only: the supplier (seller) name, phone and GSTIN, the invoice number, the invoice date, and the final grand total payable (after tax and round-off).
+IMPORTANT: Keep the supplier name in EXACTLY the script it was written in — Telugu stays in Telugu script, do NOT translate or transliterate.
+invoiceDate must be YYYY-MM-DD, or "" if not shown. total is a plain number with no currency symbol or commas (0 if not shown).
+Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
+{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0}`;
+
+  // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
+  function applyScan(parsed){
+    const filled = [];
+    const sup = parsed.supplier || {};
+    scannedSupplierExtras = { phone: sup.phone || "", gstin: sup.gstin || "" };
+    if (sup.name && !selectedSupplier && !$("supName").value.trim()){
+      const n = sup.name.trim().toLowerCase();
+      const match = findSupplierByName(sup.name)
+        || suppliers.find(s => s.name && ((s.name.toLowerCase().includes(n)) || n.includes(s.name.toLowerCase())))
+        || (sup.gstin && suppliers.find(s => s.gstin && s.gstin.toUpperCase() === sup.gstin.toUpperCase()));
+      if (match){ selectedSupplier = { id: match.id, name: match.name }; $("supName").value = match.name; }
+      else $("supName").value = sup.name.trim();
+      filled.push("supplier");
+    }
+    if (parsed.invoiceNo && !$("invNo").value.trim()){ $("invNo").value = String(parsed.invoiceNo); filled.push("invoice no."); }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(parsed.invoiceDate || "") && parsed.invoiceDate <= todayKey() && !editingId){
+      $("invDate").value = parsed.invoiceDate; filled.push("date");
+    }
+    const total = r2(String(parsed.total ?? "").replace(/[^\d.]/g, ""));
+    if (total > 0 && !(r2($("totalIn").value) > 0)){ $("totalIn").value = total; filled.push("total"); }
+    renderPay();
+    if (filled.length) toast(`Filled ${filled.join(", ")} — check before saving`);
+    else toast("Couldn't find new details on the photo");
+    if (!selectedSupplier && $("supName").value.trim()){
+      $("supName").focus();
+      renderSupplierSuggestions();   // offers "+ Add as new supplier"
+    }
+  }
+
+  // ---------- Form reset / load ----------
+  function resetForm(){
+    editingId = null;
+    selectedSupplier = null;
+    scannedSupplierExtras = {};
+    photoChanged = false;
+    showPhoto(null);
+    ["supName", "invNo", "totalIn", "splitCash", "splitUpi", "noteIn"].forEach(id => $(id).value = "");
+    $("invDate").value = todayKey();
+    $("scanWarn").style.display = "none";
+    $("noKeyHint").style.display = "none";
+    $("editBanner").classList.remove("show");
+    $("btnSave").textContent = "💾 Save purchase";
+    $("btnDelete").style.display = "none";
+    setPayMode("cash");
+  }
+
+  async function loadPurchaseIntoForm(p){
+    resetForm();
+    editingId = p.id;
+    selectedSupplier = { id: p.supplierId, name: supplierLabel(p) };
+    $("supName").value = selectedSupplier.name;
+    $("invNo").value = p.invoiceNo || "";
+    $("invDate").value = p.invoiceDate || todayKey();
+    $("totalIn").value = p.total || "";
+    $("noteIn").value = p.note || "";
+    const pay = p.pay || {};
+    $("splitCash").value = pay.cash || "";
+    $("splitUpi").value = pay.upi || "";
+    setPayMode(p.payMode || "cash");
+    $("editBannerText").textContent = `Editing · ${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + p.invoiceNo : ""}`;
+    $("editBanner").classList.add("show");
+    $("btnSave").textContent = "💾 Save changes";
+    $("btnDelete").style.display = "flex";
+    closeModal("modalLedger");
+    ledgerSupplierId = null;
+    showTab("new");
+    if (p.hasPhoto){
+      const loadingFor = p.id;
+      setBusy(true, "Loading invoice photo…");
+      try{
+        const b64 = await getPurchasePhoto(shop.shopCode, p.id);
+        if (editingId === loadingFor && !photoChanged) showPhoto(b64);
+      }catch(e){ console.error(e); toast("Couldn't load the photo — check your connection"); }
+      setBusy(false);
+    }
+  }
+  $("btnCancelEdit").onclick = () => { resetForm(); showTab("history"); };
+
+  // ---------- Supplier autocomplete ----------
+  function findSupplierByName(name){
+    const n = (name || "").trim().toLowerCase();
+    return n ? suppliers.find(s => (s.name || "").trim().toLowerCase() === n) : null;
+  }
+  function renderSupplierSuggestions(){
+    const box = $("supSuggestions");
+    const typed = $("supName").value.trim();
+    const qLower = typed.toLowerCase();
+    if (!typed){ box.classList.add("hidden"); box.innerHTML = ""; return; }
+    const matches = suppliers.filter(s => (s.name || "").toLowerCase().includes(qLower)).slice(0, 6);
+    let html = matches.map(s => `
+      <div class="autocomplete-item" data-id="${s.id}">
+        <div class="ac-name">${escapeHtml(s.name)}</div>
+        <div class="ac-phone">${escapeHtml(s.phone || "")}${balances[s.id] > 0 ? " · owes " + rupee(balances[s.id]) : ""}</div>
+      </div>`).join("");
+    if (!findSupplierByName(typed)){
+      html += `<div class="autocomplete-item" data-new="1"><div class="ac-name" style="color:var(--accent-dark);">+ Add “${escapeHtml(typed)}” as new supplier</div></div>`;
+    }
+    box.innerHTML = html;
+    box.classList.remove("hidden");
+    box.querySelectorAll(".autocomplete-item").forEach(el => {
+      el.onmousedown = (e) => e.preventDefault(); // keep focus so blur doesn't hide the list before the tap lands
+      el.onclick = () => {
+        box.classList.add("hidden");
+        if (el.dataset.new){
+          openSupplierModal(null, { name: typed, ...scannedSupplierExtras });
+        } else {
+          const s = supplierById(el.dataset.id);
+          selectedSupplier = { id: s.id, name: s.name };
+          $("supName").value = s.name;
+        }
+      };
+    });
+  }
+  $("supName").oninput = () => {
+    const exact = findSupplierByName($("supName").value);
+    selectedSupplier = exact ? { id: exact.id, name: exact.name } : null;
+    renderSupplierSuggestions();
+  };
+  $("supName").onfocus = renderSupplierSuggestions;
+  $("supName").addEventListener("blur", () => setTimeout(() => $("supSuggestions").classList.add("hidden"), 150));
+
+  // ---------- Save / delete ----------
+  $("btnSave").onclick = async () => {
+    if (busy) return;
+    if (!selectedSupplier){
+      const exact = findSupplierByName($("supName").value);
+      if (exact) selectedSupplier = { id: exact.id, name: exact.name };
+    }
+    if (!selectedSupplier){
+      toast($("supName").value.trim() ? "Tap “+ Add” to save this new supplier first" : "Pick a supplier");
+      $("supName").focus();
+      if ($("supName").value.trim()) renderSupplierSuggestions();
+      return;
+    }
+    const { total, pay, error } = computePay();
+    if (total <= 0){ toast("Enter the invoice total"); $("totalIn").focus(); return; }
+    if (error){ toast(error); return; }
+    // a "split" that is really all one mode is saved as that mode
+    const used = Object.entries(pay).filter(([, v]) => v > 0).map(([k]) => k);
+    const mode = payMode === "split" && used.length === 1 ? used[0] : payMode;
+
+    const data = {
+      supplierId: selectedSupplier.id, supplierName: selectedSupplier.name,
+      invoiceNo: $("invNo").value.trim(), invoiceDate: $("invDate").value || todayKey(),
+      total, pay, payMode: mode, paidNow: r2(pay.cash + pay.upi),
+      note: $("noteIn").value.trim()
+    };
+    const btn = $("btnSave"), label = btn.textContent;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+    try{
+      if (editingId){
+        // undefined = leave photo alone, null = remove it, string = replace it
+        await updatePurchase(shop.shopCode, editingId, data, photoChanged ? photoB64 : undefined);
+        toast("Purchase updated");
+        resetForm();
+        showTab("history");
+      } else {
+        await createPurchase(shop.shopCode, data, photoB64);
+        toast(`Saved · ${rupee(total)}${pay.credit > 0 ? " · due " + rupee(pay.credit) : ""}`);
+        resetForm();
+      }
+    }catch(e){
+      console.error(e);
+      toast("Couldn't save — check your connection");
+      btn.textContent = label;
+    }
+    btn.disabled = false;
+  };
+
+  $("btnDelete").onclick = async () => {
+    if (!editingId) return;
+    if (!confirm("Delete this purchase and its invoice photo? The supplier's balance will be recalculated.")) return;
+    try{
+      await deletePurchase(shop.shopCode, editingId);
+      toast("Purchase deleted");
+      resetForm();
+      showTab("history");
+    }catch(e){ console.error(e); toast("Couldn't delete — check your connection"); }
+  };
+
+  // =====================================================================
+  // History
+  // =====================================================================
+  document.querySelectorAll("#histChips .filter-chip").forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll("#histChips .filter-chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      histFilter = chip.dataset.f;
+      renderHistory();
+    };
+  });
+  function filteredPurchases(){
+    const today = todayKey();
+    if (histFilter === "today") return purchases.filter(p => p.invoiceDate === today);
+    if (histFilter === "week"){
+      const d = new Date(); d.setDate(d.getDate() - 6);
+      const from = todayKey(d);
+      return purchases.filter(p => p.invoiceDate >= from && p.invoiceDate <= today);
+    }
+    if (histFilter === "month") return purchases.filter(p => (p.invoiceDate || "").slice(0, 7) === today.slice(0, 7));
+    return purchases;
+  }
+  function renderHistory(){
+    const list = filteredPurchases();
+    $("histCount").textContent = `${list.length} purchase${list.length !== 1 ? "s" : ""}`;
+    $("histTotal").textContent = rupee(list.reduce((s, p) => s + (p.total || 0), 0));
+    const box = $("histList");
+    if (list.length === 0){ box.innerHTML = `<div class="history-empty">No purchases in this range yet</div>`; return; }
+    box.innerHTML = list.map(p => {
+      const due = r2((p.total || 0) - (p.paidNow || 0));
+      return `<div class="history-item" data-id="${p.id}">
+        <div class="hi-left" style="min-width:0;">
+          <b style="font-family:var(--sans);">${p.hasPhoto ? "📷 " : ""}${escapeHtml(supplierLabel(p))}</b>
+          <div>${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""} · ${escapeHtml(payLabel(p))}</div>
+        </div>
+        <div style="flex-shrink:0; margin-left:10px;">
+          <div class="hi-right">${rupee(p.total)}</div>
+          ${due > 0 ? `<div class="due-tag">Due ${rupee(due)}</div>` : `<div class="ok-tag">Paid</div>`}
+        </div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".history-item").forEach(el => {
+      el.onclick = () => { const p = purchases.find(x => x.id === el.dataset.id); if (p) loadPurchaseIntoForm(p); };
+    });
+  }
+
+  // =====================================================================
+  // Suppliers & account sheet
+  // =====================================================================
+  function renderSuppliers(){
+    const owed = Object.values(balances).reduce((s, b) => s + (b > 0 ? b : 0), 0);
+    $("owedTotal").textContent = rupee(owed);
+    $("statSuppliers").textContent = suppliers.length;
+    const month = todayKey().slice(0, 7);
+    $("statMonth").textContent = "₹" + Math.round(purchases.filter(p => (p.invoiceDate || "").slice(0, 7) === month).reduce((s, p) => s + (p.total || 0), 0)).toLocaleString("en-IN");
+
+    const box = $("supList");
+    if (suppliers.length === 0){ box.innerHTML = `<div class="history-empty">No suppliers yet — add one, or type a new name on a purchase</div>`; return; }
+    const sorted = suppliers.slice().sort((a, b) => (balances[b.id] || 0) - (balances[a.id] || 0) || (a.name || "").localeCompare(b.name || ""));
+    box.innerHTML = sorted.map(s => {
+      const bal = r2(balances[s.id] || 0);
+      const n = purchases.filter(p => p.supplierId === s.id).length;
+      const tag = bal > 0 ? `<div class="hi-right" style="color:var(--danger);">${rupee(bal)}</div><div class="due-tag" style="color:var(--ink-soft); font-weight:600;">to pay</div>`
+                : bal < 0 ? `<div class="hi-right" style="color:var(--accent-dark);">${rupee(-bal)}</div><div class="ok-tag">advance</div>`
+                : `<div class="ok-tag">Settled</div>`;
+      return `<div class="history-item" data-id="${s.id}">
+        <div class="hi-left">
+          <b style="font-family:var(--sans);">${escapeHtml(s.name)}</b>
+          <div>${s.phone ? escapeHtml(s.phone) + " · " : ""}${n} purchase${n !== 1 ? "s" : ""}</div>
+        </div>
+        <div>${tag}</div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".history-item").forEach(el => el.onclick = () => openLedger(el.dataset.id));
+  }
+
+  function openLedger(supplierId){
+    ledgerSupplierId = supplierId;
+    renderLedger();
+    openModal("modalLedger");
+  }
+  function renderLedger(){
+    const s = supplierById(ledgerSupplierId);
+    if (!s){ closeModal("modalLedger"); ledgerSupplierId = null; return; }
+    $("lg-title").textContent = s.name;
+    $("lg-sub").innerHTML = [
+      s.phone ? `<a href="tel:${escapeHtml(s.phone)}" style="color:var(--accent-dark); font-weight:600;">📞 ${escapeHtml(s.phone)}</a>` : "",
+      s.gstin ? "GSTIN " + escapeHtml(s.gstin) : ""
+    ].filter(Boolean).join(" · ") || "No phone saved";
+    const bal = r2(balances[s.id] || 0);
+    $("lg-balLabel").textContent = bal < 0 ? "Advance paid" : "Balance owed";
+    $("lg-bal").textContent = rupee(Math.abs(bal));
+
+    // Oldest first to build the running balance, then show newest first.
+    const entries = [
+      ...purchases.filter(p => p.supplierId === s.id).map(p => ({ kind: "p", date: p.invoiceDate, delta: r2((p.total || 0) - (p.paidNow || 0)), rec: p })),
+      ...payments.filter(p => p.supplierId === s.id).map(p => ({ kind: "pay", date: p.date, delta: -r2(p.amount), rec: p }))
+    ].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    let running = 0;
+    entries.forEach(e => { running = r2(running + e.delta); e.running = running; });
+    entries.reverse();
+
+    const box = $("lg-list");
+    if (entries.length === 0){ box.innerHTML = `<div class="history-empty" style="padding:16px 0;">No purchases or payments yet</div>`; return; }
+    box.innerHTML = entries.map(e => {
+      if (e.kind === "p"){
+        const p = e.rec, paid = paidParts(p);
+        return `<div class="ledger-row">
+          <div class="lg-info" data-pid="${p.id}">
+            <div class="lg-t1">${p.hasPhoto ? "📷 " : ""}Purchase${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""}</div>
+            <div class="lg-t2">${fmtDate(p.invoiceDate)} · total ${rupee(p.total)} · ${paid ? "paid " + paid : "on credit"}</div>
+          </div>
+          <div><div class="lg-amt" style="color:${e.delta > 0 ? "var(--danger)" : "var(--ink-soft)"};">${e.delta > 0 ? "+" + rupee(e.delta) : "—"}</div><div class="lg-bal">bal ${rupee(e.running)}</div></div>
+        </div>`;
+      }
+      const pay = e.rec;
+      return `<div class="ledger-row">
+        <div class="lg-info">
+          <div class="lg-t1">Payment · ${MODE_LABEL[pay.payMode] || ""}</div>
+          <div class="lg-t2">${fmtDate(pay.date)}${pay.note ? " · " + escapeHtml(pay.note) : ""}</div>
+        </div>
+        <div><div class="lg-amt" style="color:var(--accent-dark);">−${rupee(pay.amount)}</div><div class="lg-bal">bal ${rupee(e.running)}</div></div>
+        <button class="ledger-del" data-payid="${pay.id}" title="Delete payment">✕</button>
+      </div>`;
+    }).join("");
+    box.querySelectorAll("[data-pid]").forEach(el => el.onclick = () => {
+      const p = purchases.find(x => x.id === el.dataset.pid);
+      if (p) loadPurchaseIntoForm(p);
+    });
+    box.querySelectorAll("[data-payid]").forEach(btn => btn.onclick = async () => {
+      if (!confirm("Delete this payment? The balance will go back up.")) return;
+      try{ await deleteSupplierPayment(shop.shopCode, btn.dataset.payid); toast("Payment deleted"); }
+      catch(e){ console.error(e); toast("Couldn't delete — check your connection"); }
+    });
+  }
+  $("lg-close").onclick = () => { closeModal("modalLedger"); ledgerSupplierId = null; };
+  $("lg-edit").onclick = () => openSupplierModal(supplierById(ledgerSupplierId));
+
+  // ---------- Add / edit supplier ----------
+  let supplierModalEditing = null;
+  function openSupplierModal(existing, prefill = {}){
+    supplierModalEditing = existing;
+    $("supModalTitle").textContent = existing ? "Edit supplier" : "New supplier";
+    $("sm-name").value = existing ? existing.name : (prefill.name || "");
+    $("sm-phone").value = existing ? (existing.phone || "") : (prefill.phone || "");
+    $("sm-gstin").value = existing ? (existing.gstin || "") : (prefill.gstin || "");
+    openModal("modalSupplier");
+    setTimeout(() => $("sm-name").focus(), 50);
+  }
+  $("btnNewSupplier").onclick = () => openSupplierModal(null);
+  $("sm-cancel").onclick = () => closeModal("modalSupplier");
+  $("sm-save").onclick = async () => {
+    const name = $("sm-name").value.trim();
+    const phone = $("sm-phone").value.trim();
+    const gstin = $("sm-gstin").value.trim().toUpperCase();
+    if (!name){ toast("Enter the supplier's name"); return; }
+    const clash = findSupplierByName(name);
+    if (clash && (!supplierModalEditing || clash.id !== supplierModalEditing.id)){ toast("A supplier with this name already exists"); return; }
+    const btn = $("sm-save");
+    btn.disabled = true;
+    try{
+      if (supplierModalEditing){
+        await updateSupplier(shop.shopCode, supplierModalEditing.id, { name, phone, gstin });
+        toast("Supplier updated");
+      } else {
+        const id = await addSupplier(shop.shopCode, { name, phone, gstin });
+        // created from the purchase form: select it straight away
+        if ($("sec-new").classList.contains("show")){
+          selectedSupplier = { id, name };
+          $("supName").value = name;
+        }
+        toast("Supplier added");
+      }
+      closeModal("modalSupplier");
+    }catch(e){ console.error(e); toast("Couldn't save — check your connection"); }
+    btn.disabled = false;
+  };
+
+  // ---------- Record a later payment ----------
+  let laterPayMode = "cash";
+  document.querySelectorAll("#payModeChips .filter-chip").forEach(c => {
+    c.onclick = () => {
+      laterPayMode = c.dataset.mode;
+      document.querySelectorAll("#payModeChips .filter-chip").forEach(x => x.classList.toggle("active", x === c));
+    };
+  });
+  $("lg-pay").onclick = () => {
+    const s = supplierById(ledgerSupplierId);
+    if (!s) return;
+    const bal = r2(balances[s.id] || 0);
+    $("pay-sub").textContent = `${s.name} · owed ${rupee(Math.max(bal, 0))}`;
+    $("pay-amt").value = bal > 0 ? bal : "";
+    $("pay-date").value = todayKey();
+    $("pay-note").value = "";
+    openModal("modalPay");
+  };
+  $("pay-cancel").onclick = () => closeModal("modalPay");
+  $("pay-save").onclick = async () => {
+    const s = supplierById(ledgerSupplierId);
+    const amount = r2($("pay-amt").value);
+    if (!s) return;
+    if (amount <= 0){ toast("Enter the amount paid"); return; }
+    const bal = r2(balances[s.id] || 0);
+    if (amount > bal && !confirm(`That's more than the ${rupee(Math.max(bal, 0))} owed — the extra will show as an advance. Continue?`)) return;
+    const btn = $("pay-save");
+    btn.disabled = true;
+    try{
+      await addSupplierPayment(shop.shopCode, {
+        supplierId: s.id, supplierName: s.name, amount, payMode: laterPayMode,
+        date: $("pay-date").value || todayKey(), note: $("pay-note").value.trim()
+      });
+      toast(`Payment of ${rupee(amount)} saved`);
+      closeModal("modalPay");
+    }catch(e){ console.error(e); toast("Couldn't save — check your connection"); }
+    btn.disabled = false;
+  };
+
+  resetForm();
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
