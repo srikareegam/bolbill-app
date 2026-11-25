@@ -83,7 +83,7 @@
     <div class="modal-title">Confirm item</div>
     <div class="modal-sub">Check what I heard, fix anything, then add it</div>
     <div class="heard-text" id="heardText">—</div>
-    <div class="field"><label>Product name</label><input type="text" id="v-name"></div>
+    <div class="field"><label>Product name</label><input type="text" id="v-name"><div class="price-hint" id="v-hint"></div></div>
     <div class="parsed-row">
       <div class="field"><label>Quantity</label><input type="number" id="v-qty" inputmode="decimal"></div>
       <div class="field"><label>Price / unit ₹</label><input type="number" id="v-price" inputmode="decimal"></div>
@@ -100,7 +100,7 @@
   <div class="modal">
     <div class="modal-title">Add item manually</div>
     <div class="modal-sub">If your phone can't hear you right now</div>
-    <div class="field"><label>Product name</label><input type="text" id="m-name" placeholder="e.g. Sugar"></div>
+    <div class="field"><label>Product name</label><input type="text" id="m-name" placeholder="e.g. Sugar"><div class="price-hint" id="m-hint"></div></div>
     <div class="parsed-row">
       <div class="field"><label>Quantity</label><input type="number" id="m-qty" value="1" inputmode="decimal"></div>
       <div class="field"><label>Price / unit ₹</label><input type="number" id="m-price" inputmode="decimal"></div>
@@ -156,7 +156,7 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, buildPriceList, findPriceMatches } from "./data.js";
 import { mountCalculator } from "./calc.js";
 
 const shop = requireShopOrRedirect();
@@ -261,6 +261,35 @@ if (shop) {
   let allCustomers = [];
   subscribeCustomers(shop.shopCode, (list) => { allCustomers = list; });
 
+  // ---------- Latest purchase price hints (from the Purchase page) ----------
+  // Only a hint: shows what the product was last bought for. The selling price is still typed by hand.
+  let priceList = new Map();
+  const hintRefreshers = [];
+  subscribePurchases(shop.shopCode, (rows) => { priceList = buildPriceList(rows); hintRefreshers.forEach(f => f()); });
+  const shortDate = (key) => key ? new Date(key + "T00:00:00").toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) : "";
+  function priceHintHtml(name){
+    const { exact, matches } = findPriceMatches(priceList, name, 3);
+    if (exact) return `📦 Bought at <b>${rupee(exact.price)}</b> · ${escapeHtml(exact.supplierName || "")} · ${shortDate(exact.date)}`;
+    return matches.map(m => `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)} · ${rupee(m.price)}</button>`).join("");
+  }
+  // Tapping a suggestion fills the product name only — never the price.
+  function attachPriceHint(inputId, hintId, modalId){
+    const update = () => { $(hintId).innerHTML = priceHintHtml($(inputId).value); };
+    $(inputId).addEventListener("input", update);
+    $(hintId).addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-fill]");
+      if (!chip) return;
+      $(inputId).value = chip.dataset.fill;
+      update();
+    });
+    // the modal is opened from several places (manual add, editing a row, voice); refresh whenever it shows
+    new MutationObserver(() => { if (!$(modalId).classList.contains("hidden")) update(); })
+      .observe($(modalId), { attributes: true, attributeFilter: ["class"] });
+    hintRefreshers.push(update);
+  }
+  attachPriceHint("m-name", "m-hint", "modalManual");
+  attachPriceHint("v-name", "v-hint", "modalVoice");
+
   function renderCustomerSuggestions(query){
     const box = $("customerSuggestions");
     const q = query.trim().toLowerCase();
@@ -322,6 +351,7 @@ if (shop) {
     renderItems();
   };
   const calc = mountCalculator({
+    nameHint: priceHintHtml,
     sub: "Type qty, tap ×, type price — add each item, then print",
     finishLabel: "🖨 Add & Print Bill",
     toast,

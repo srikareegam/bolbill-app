@@ -249,6 +249,12 @@ input:focus, select:focus{ border-color: var(--accent); }
 .calc-pad .calc-x{ background:var(--accent); color:#fff; }
 .calc-pad .calc-zero{ grid-column: span 2; }
 
+/* ---------- Latest purchase price hint (Bill page) ---------- */
+.price-hint{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; font-size:12.5px; color:var(--ink-soft); line-height:1.45; }
+.price-hint:empty{ display:none; }
+.price-hint b{ color:var(--accent-dark); font-family:var(--mono); }
+.ph-chip{ border:1px solid #BFDDD1; background:var(--accent-soft); color:var(--accent-dark); border-radius:100px; padding:5px 10px; font-size:12px; font-weight:600; font-family:var(--sans); cursor:pointer; }
+
 /* ---------- Toast ---------- */
 #toast{
   position:fixed; left:50%; bottom:130px; transform:translateX(-50%) translateY(20px);

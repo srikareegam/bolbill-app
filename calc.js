@@ -1,21 +1,23 @@
-// Quick calculator keypad (qty × price) shared by the Bill page and the Purchase page.
+// Quick calculator keypad (qty × price) used by the Bill page.
 // Styles live in style.css under "Quick calculator".
 //
-// mountCalculator({ sub, finishLabel, toast, onAdd, onFinish }) -> { open() }
+// mountCalculator({ sub, finishLabel, toast, onAdd, onFinish, nameHint }) -> { open() }
 //   onAdd(item)     — called with { name, qty, price } when "+ Add item" is tapped (name may be "").
 //   onFinish(item)  — called when the finish button is tapped; item is null if nothing valid is typed.
 //                     Return true to close the keypad, false to keep it open.
+//   nameHint(name)  — optional; returns HTML shown under the name box (e.g. last purchase price).
+//                     Elements with data-fill="…" in it fill the name box when tapped.
 
 const rupee = (n) => "₹" + (Math.round(n*100)/100).toFixed(2);
 
-export function mountCalculator({ sub, finishLabel, toast, onAdd, onFinish }){
+export function mountCalculator({ sub, finishLabel, toast, onAdd, onFinish, nameHint }){
   const root = document.createElement("div");
   root.className = "modal-backdrop hidden";
   root.innerHTML = `
     <div class="modal">
       <div class="modal-title">Quick Calculator</div>
       <div class="modal-sub"></div>
-      <div class="field"><label>Item name (optional)</label><input type="text" class="c-name" placeholder="e.g. Sugar"></div>
+      <div class="field"><label>Item name (optional)</label><input type="text" class="c-name" placeholder="e.g. Sugar"><div class="price-hint c-hint"></div></div>
       <div class="calc-display">
         <div class="calc-expr">0</div>
         <div class="calc-amt">₹0.00</div>
@@ -59,7 +61,15 @@ export function mountCalculator({ sub, finishLabel, toast, onAdd, onFinish }){
     }
     render();
   }
-  function reset(){ stage = "qty"; qty = ""; price = ""; q(".c-name").value = ""; render(); }
+  function reset(){ stage = "qty"; qty = ""; price = ""; q(".c-name").value = ""; renderHint(); render(); }
+  function renderHint(){ q(".c-hint").innerHTML = nameHint ? nameHint(q(".c-name").value) : ""; }
+  q(".c-name").addEventListener("input", renderHint);
+  q(".c-hint").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-fill]");
+    if (!chip) return;
+    q(".c-name").value = chip.dataset.fill;
+    renderHint();
+  });
   function buildItem(){
     const nq = parseFloat(qty) || 0, np = parseFloat(price) || 0;
     if (nq <= 0 || np <= 0) return null;

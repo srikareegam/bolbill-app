@@ -193,6 +193,56 @@ export function computeSupplierBalances(purchases, payments) {
   return bal;
 }
 
+// ---------- Product prices (latest purchase price per product) ----------
+// Same product, different spelling: "Red Label 500 gm" and "red label 500g" give the same key.
+const UNIT_CANON = {
+  g: "g", gm: "g", gms: "g", gram: "g", grams: "g", gr: "g",
+  kg: "kg", kgs: "kg", kilo: "kg", kilos: "kg",
+  l: "l", ltr: "l", ltrs: "l", litre: "l", litres: "l", liter: "l", liters: "l", lt: "l",
+  ml: "ml", mls: "ml",
+  pc: "pc", pcs: "pc", piece: "pc", pieces: "pc",
+};
+export function productKey(name) {
+  return String(name || "").toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s.]/gu, " ")      // drop punctuation, keep letters of any script (Telugu too)
+    .replace(/\s+/g, " ").trim()
+    // "500 gm" / "500gms" / "1 Kilo" -> "500g" / "1kg"; only real units are joined to the number
+    .replace(/(\d+(?:\.\d+)?)\s?([a-z]+)\b/g, (m, num, unit) => UNIT_CANON[unit] ? num + UNIT_CANON[unit] : m);
+}
+
+// Builds Map(key -> { key, name, price, date, supplierName, supplierId, purchaseId, history[] }).
+// "Latest" = newest invoice date, then newest entry that day; within one invoice the last row wins.
+// Worked out from purchases every time, so editing/deleting a purchase can't leave a stale price.
+export function buildPriceList(purchases) {
+  const ms = (p) => (p.createdAt && p.createdAt.toMillis) ? p.createdAt.toMillis() : Date.now();
+  const ordered = purchases.slice().sort((a, b) =>
+    (a.invoiceDate || "").localeCompare(b.invoiceDate || "") || ms(a) - ms(b));
+  const list = new Map();
+  ordered.forEach(p => (p.items || []).forEach(it => {
+    const key = productKey(it.name);
+    if (!key) return;
+    const entry = { price: it.price, date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id };
+    const prev = list.get(key);
+    const history = prev ? [entry, ...prev.history] : [entry];
+    list.set(key, Object.assign({ key, name: it.name }, entry, { history }));
+  }));
+  return list;
+}
+
+// For the Bill page hint: an exact product first, otherwise products whose name has every typed word.
+export function findPriceMatches(priceList, typed, limit = 3) {
+  const key = productKey(typed);
+  if (!key) return { exact: null, matches: [] };
+  const exact = priceList.get(key) || null;
+  if (exact) return { exact, matches: [] };
+  const words = key.split(" ");
+  const matches = [...priceList.values()]
+    .filter(e => words.every(w => e.key.includes(w)))
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .slice(0, limit);
+  return { exact: null, matches };
+}
+
 // ---------- Customer directory (for name -> phone autofill) ----------
 function customerDocId(name) {
   const slug = (name || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");

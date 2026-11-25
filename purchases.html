@@ -50,6 +50,19 @@
   .scan-result a{ text-decoration:underline; font-weight:700; }
   /* fields the photo filled in stay tinted until the user touches them */
   input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
+  /* ---- products on a purchase ---- */
+  .prod-item{ position:relative; padding:6px 0; border-bottom:1px dashed var(--line); }
+  .prod-item:last-child{ border-bottom:none; }
+  .prod-item .edit-item-row{ padding:0; border-bottom:none; }
+  .prod-item .ei-price{ width:86px; text-align:right; font-family:var(--mono); }
+  .prod-hint{ font-size:11.5px; color:var(--ink-soft); margin:4px 2px 0; font-family:var(--mono); }
+  .prod-hint:empty{ display:none; }
+  .prod-hint .up{ color:var(--danger); font-weight:700; }
+  .prod-hint .down{ color:var(--accent-dark); font-weight:700; }
+  .prod-item .autocomplete-list{ left:0; right:40px; }
+  .was-tag{ font-family:var(--mono); font-size:11px; font-weight:700; margin-top:2px; text-align:right; }
+  .was-tag.up{ color:var(--danger); }
+  .was-tag.down{ color:var(--accent-dark); }
   input.big-total{ font-family:var(--mono); font-size:22px; font-weight:700; text-align:right; padding:12px 14px; }
   .money-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-family:var(--mono); font-size:13.5px; color:var(--ink-soft); padding:4px 0; }
   .money-row input{ width:130px; text-align:right; font-family:var(--mono); padding:8px 10px; font-size:15px; }
@@ -87,6 +100,7 @@
     <div class="tabbtn active" data-tab="new">New</div>
     <div class="tabbtn" data-tab="history">History</div>
     <div class="tabbtn" data-tab="suppliers">Suppliers</div>
+    <div class="tabbtn" data-tab="prices">Prices</div>
   </div>
 
   <!-- ===== New / edit purchase ===== -->
@@ -141,6 +155,12 @@
     </div>
     <div class="field"><label>Invoice total ₹</label><input type="number" id="totalIn" class="big-total" inputmode="decimal" placeholder="0.00"></div>
 
+    <div class="section-label">
+      <span>Products &amp; price per piece</span>
+      <span style="margin-left:auto;"><button class="icon-btn" id="btnAddProduct">+ Add product</button></span>
+    </div>
+    <div class="card" id="productsCard" style="padding:6px 12px;"></div>
+
     <div class="section-label">Paid by</div>
     <div class="filter-row" id="modeChips">
       <div class="filter-chip active" data-mode="cash">Cash</div>
@@ -184,6 +204,13 @@
     </div>
     <button class="btn btn-secondary btn-full" id="btnNewSupplier" style="margin-bottom:12px;">+ Add supplier</button>
     <div id="supList"></div>
+  </div>
+
+  <!-- ===== Prices: latest purchase price per product ===== -->
+  <div class="pur-sec" id="sec-prices">
+    <div class="field"><input type="text" id="priceSearch" placeholder="🔍 Search product" autocomplete="off"></div>
+    <div class="money-row" style="margin:0 4px 10px;"><span id="priceCount">0 products</span><span>latest price</span></div>
+    <div id="priceList"></div>
   </div>
 </div>
 
@@ -261,6 +288,16 @@
   </div>
 </div>
 
+<!-- Price history of one product -->
+<div class="modal-backdrop hidden" id="modalPriceHist">
+  <div class="modal">
+    <div class="modal-title" id="ph-title">Product</div>
+    <div class="modal-sub">Every price you bought it at — newest first</div>
+    <div class="card" id="ph-list" style="padding:4px 14px;"></div>
+    <button class="btn btn-ghost btn-full" id="ph-close" style="margin-top:12px;">Close</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script type="module">
@@ -269,7 +306,7 @@ import {
   subscribeSuppliers, addSupplier, updateSupplier,
   subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
   subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
-  computeSupplierBalances
+  computeSupplierBalances, productKey, buildPriceList, findPriceMatches
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
 
@@ -311,10 +348,12 @@ if (shop) {
   let settings = {};
   let suppliers = [], purchases = [], payments = [];
   let balances = {};
+  let priceList = new Map();     // latest purchase price per product (built from purchases)
   let ledgerSupplierId = null;   // supplier whose account sheet is open
   let histFilter = "today";
   const supplierById = (id) => suppliers.find(s => s.id === id);
   const supplierLabel = (p) => (supplierById(p.supplierId) || {}).name || p.supplierName || "Supplier";
+  const supplierNameOf = (e) => (supplierById(e.supplierId) || {}).name || e.supplierName || "Supplier";
 
   subscribeSettings(shop.shopCode, (d) => { settings = d; });
   subscribeSuppliers(shop.shopCode, (rows) => { suppliers = rows; refreshAll(); });
@@ -328,8 +367,11 @@ if (shop) {
 
   function refreshAll(){
     balances = computeSupplierBalances(purchases, payments);
+    priceList = buildPriceList(purchases);
     renderHistory();
     renderSuppliers();
+    renderPrices();
+    refreshProductHints();
     if (ledgerSupplierId) renderLedger();
   }
 
@@ -525,11 +567,12 @@ if (shop) {
 
   // ---------- Auto-fill from the invoice photo (Gemini) ----------
   const INVOICE_PROMPT = `You are reading a supplier's purchase invoice / bill given to an Indian kirana (grocery) shop. It may be printed or handwritten and may mix Telugu and English.
-Extract only: the supplier (seller) name, phone and GSTIN, the invoice number, the invoice date, and the final grand total payable (after tax and round-off).
-IMPORTANT: Keep the supplier name in EXACTLY the script it was written in — Telugu stays in Telugu script, do NOT translate or transliterate.
+Extract: the supplier (seller) name, phone and GSTIN, the invoice number, the invoice date, the final grand total payable (after tax and round-off), and every product line.
+For each product give its name and price = the price of ONE piece/pack (the rate column, not the line amount). If only quantity and line amount are shown, price = amount ÷ quantity. Keep the pack size in the name as printed (e.g. "Red Label 500g").
+IMPORTANT: Keep the supplier name and product names in EXACTLY the script they were written in — Telugu stays in Telugu script, do NOT translate or transliterate.
 invoiceDate must be YYYY-MM-DD, or "" if not shown. total is a plain number with no currency symbol or commas (0 if not shown).
 Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
-{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0}`;
+{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","price":0}]}`;
 
   // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
   // Returns one line per filled field for the "Found on the invoice" box; filled inputs get tinted.
@@ -567,6 +610,16 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       fill("totalIn", total);
       found.push(`Total: <b>${rupee(total)}</b>`);
     }
+    const scanned = (Array.isArray(parsed.items) ? parsed.items : [])
+      .map(it => ({ name: String(it.name ?? "").trim(), price: r2(String(it.price ?? "").replace(/[^\d.]/g, "")) }))
+      .filter(it => it.name);
+    const productsTyped = products.some(it => String(it.name ?? "").trim() || String(it.price ?? "").trim());
+    if (scanned.length && !productsTyped){
+      products = scanned.map(it => ({ id: newRowId(), name: it.name, price: it.price > 0 ? it.price : "", auto: true }));
+      renderProducts();
+      const noPrice = scanned.filter(it => !(it.price > 0)).length;
+      found.push(`Products: <b>${scanned.length} read</b> — check names &amp; prices${noPrice ? ` (${noPrice} without a price — fill them in)` : ""}`);
+    }
     renderPay();
     if (newSupplierName){
       $("supName").focus();
@@ -576,6 +629,89 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   }
   // The tint means "came from the photo — check me"; it goes away once the user edits the field.
   ["supName", "invNo", "invDate", "totalIn"].forEach(id => $(id).addEventListener("input", () => $(id).classList.remove("autofilled")));
+
+  // ---------- Products on the purchase (name + price per piece) ----------
+  let products = [];   // [{ id, name, price, auto }] — auto = filled from the photo, not yet touched
+  const newRowId = () => Date.now() + "_" + Math.random().toString(36).slice(2);
+  // When editing, compare against the other purchases so "last ₹…" isn't this purchase's own price.
+  const priceListForForm = () => editingId ? buildPriceList(purchases.filter(p => p.id !== editingId)) : priceList;
+
+  function renderProducts(){
+    const card = $("productsCard");
+    if (products.length === 0){
+      card.innerHTML = `<div class="history-empty" style="padding:12px 0;">Optional — what you bought and the price per piece. Reading the photo fills these in.</div>`;
+      return;
+    }
+    card.innerHTML = products.map(it => `
+      <div class="prod-item" data-id="${it.id}">
+        <div class="edit-item-row">
+          <input type="text" class="ei-name${it.auto ? " autofilled" : ""}" value="${escapeHtml(it.name)}" placeholder="e.g. Red Label 500g" autocomplete="off">
+          <input type="number" class="ei-price${it.auto ? " autofilled" : ""}" value="${escapeHtml(it.price ?? "")}" placeholder="₹ each" inputmode="decimal">
+          <button class="ei-del" title="Remove">✕</button>
+        </div>
+        <div class="autocomplete-list hidden"></div>
+        <div class="prod-hint"></div>
+      </div>`).join("");
+    card.querySelectorAll(".prod-item").forEach(el => {
+      const it = products.find(p => p.id === el.dataset.id);
+      const nameIn = el.querySelector(".ei-name"), priceIn = el.querySelector(".ei-price");
+      const touched = () => { it.auto = false; nameIn.classList.remove("autofilled"); priceIn.classList.remove("autofilled"); };
+      el.querySelector(".ei-del").onclick = () => { products = products.filter(p => p !== it); renderProducts(); };
+      nameIn.oninput = () => { it.name = nameIn.value; touched(); renderProductHint(el, it); renderProductSuggestions(el, it); };
+      nameIn.onfocus = () => renderProductSuggestions(el, it);
+      nameIn.addEventListener("blur", () => setTimeout(() => el.querySelector(".autocomplete-list").classList.add("hidden"), 150));
+      priceIn.oninput = () => { it.price = priceIn.value; touched(); renderProductHint(el, it); };
+      renderProductHint(el, it);
+    });
+  }
+  // "last ₹45 · Sri Balaji · 20 Nov  ▲ ₹3" — what it was last bought for, and the change.
+  function renderProductHint(el, it){
+    const box = el.querySelector(".prod-hint");
+    const last = priceListForForm().get(productKey(it.name));
+    if (!last){ box.innerHTML = ""; return; }
+    const now = r2(it.price), was = r2(last.price);
+    let change = "";
+    if (now > 0 && now !== was){
+      change = now > was ? ` <span class="up">▲ ${rupee(now - was)}</span>` : ` <span class="down">▼ ${rupee(was - now)}</span>`;
+    }
+    box.innerHTML = `last ${rupee(was)} · ${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}${change}`;
+  }
+  // Suggest products bought before, so the same product keeps the same name.
+  function renderProductSuggestions(el, it){
+    const box = el.querySelector(".autocomplete-list");
+    const list = priceListForForm();
+    const { exact, matches } = findPriceMatches(list, it.name, 5);
+    if (exact || !matches.length){ box.classList.add("hidden"); return; }
+    box.innerHTML = matches.map(m => `
+      <div class="autocomplete-item" data-key="${escapeHtml(m.key)}">
+        <div class="ac-name">${escapeHtml(m.name)}</div>
+        <div class="ac-phone">last ${rupee(m.price)} · ${escapeHtml(supplierNameOf(m))}</div>
+      </div>`).join("");
+    box.classList.remove("hidden");
+    box.querySelectorAll(".autocomplete-item").forEach(opt => {
+      opt.onmousedown = (e) => e.preventDefault();
+      opt.onclick = () => {
+        const m = list.get(opt.dataset.key);
+        it.name = m.name;
+        el.querySelector(".ei-name").value = m.name;
+        box.classList.add("hidden");
+        renderProductHint(el, it);
+        el.querySelector(".ei-price").focus();
+      };
+    });
+  }
+  function refreshProductHints(){
+    document.querySelectorAll("#productsCard .prod-item").forEach(el => {
+      const it = products.find(p => p.id === el.dataset.id);
+      if (it) renderProductHint(el, it);
+    });
+  }
+  $("btnAddProduct").onclick = () => {
+    products.push({ id: newRowId(), name: "", price: "" });
+    renderProducts();
+    const names = $("productsCard").querySelectorAll(".ei-name");
+    names[names.length - 1]?.focus();
+  };
 
   // ---------- Form reset / load ----------
   function resetForm(){
@@ -587,6 +723,8 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     ["supName", "invNo", "totalIn", "splitCash", "splitUpi", "noteIn"].forEach(id => $(id).value = "");
     $("invDate").value = todayKey();
     ["supName", "invNo", "invDate", "totalIn"].forEach(id => $(id).classList.remove("autofilled"));
+    products = [];
+    renderProducts();
     resetScanPanel();
     setLoadLine("");
     $("editBanner").classList.remove("show");
@@ -608,6 +746,8 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     $("splitCash").value = pay.cash || "";
     $("splitUpi").value = pay.upi || "";
     setPayMode(p.payMode || "cash");
+    products = (p.items || []).map(it => ({ id: newRowId(), name: it.name, price: it.price }));
+    renderProducts();
     $("editBannerText").textContent = `Editing · ${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + p.invoiceNo : ""}`;
     $("editBanner").classList.add("show");
     $("btnSave").textContent = "💾 Save changes";
@@ -688,6 +828,18 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     const { total, pay, error } = computePay();
     if (total <= 0){ toast("Enter the invoice total"); $("totalIn").focus(); return; }
     if (error){ toast(error); return; }
+    const items = [];
+    const known = priceListForForm();
+    for (const it of products){
+      const typed = String(it.name ?? "").trim(), priceStr = String(it.price ?? "").trim();
+      if (!typed && !priceStr) continue;                      // blank row: just drop it
+      if (!typed){ toast("A product has a price but no name — add the name or remove it"); return; }
+      const price = r2(priceStr);
+      if (!(price > 0)){ toast(`Enter a price for ${typed}`); return; }
+      // "red label 500 gm" is saved as the existing "Red Label 500g", so one product keeps one name
+      const existing = known.get(productKey(typed));
+      items.push({ name: existing ? existing.name : typed, price });
+    }
     // a "split" that is really all one mode is saved as that mode
     const used = Object.entries(pay).filter(([, v]) => v > 0).map(([k]) => k);
     const mode = payMode === "split" && used.length === 1 ? used[0] : payMode;
@@ -696,7 +848,8 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       supplierId: selectedSupplier.id, supplierName: selectedSupplier.name,
       invoiceNo: $("invNo").value.trim(), invoiceDate: $("invDate").value || todayKey(),
       total, pay, payMode: mode, paidNow: r2(pay.cash + pay.upi),
-      note: $("noteIn").value.trim()
+      note: $("noteIn").value.trim(),
+      items
     };
     const btn = $("btnSave"), label = btn.textContent;
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
@@ -764,7 +917,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       return `<div class="history-item" data-id="${p.id}">
         <div class="hi-left" style="min-width:0;">
           <b style="font-family:var(--sans);">${p.hasPhoto ? "📷 " : ""}${escapeHtml(supplierLabel(p))}</b>
-          <div>${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""} · ${escapeHtml(payLabel(p))}</div>
+          <div>${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""}${(p.items || []).length ? ` · ${p.items.length} product${p.items.length !== 1 ? "s" : ""}` : ""} · ${escapeHtml(payLabel(p))}</div>
         </div>
         <div style="flex-shrink:0; margin-left:10px;">
           <div class="hi-right">${rupee(p.total)}</div>
@@ -776,6 +929,54 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       el.onclick = () => { const p = purchases.find(x => x.id === el.dataset.id); if (p) loadPurchaseIntoForm(p); };
     });
   }
+
+  // =====================================================================
+  // Prices: latest purchase price of every product
+  // =====================================================================
+  function renderPrices(){
+    const typed = $("priceSearch").value;
+    const words = productKey(typed).split(" ").filter(Boolean);
+    const all = [...priceList.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const list = words.length ? all.filter(e => words.every(w => e.key.includes(w))) : all;
+    $("priceCount").textContent = `${list.length} product${list.length !== 1 ? "s" : ""}`;
+    const box = $("priceList");
+    if (!all.length){ box.innerHTML = `<div class="history-empty">No prices yet — add products when you enter a purchase</div>`; return; }
+    if (!list.length){ box.innerHTML = `<div class="history-empty">No product matches “${escapeHtml(typed)}”</div>`; return; }
+    box.innerHTML = list.map(e => {
+      const prev = e.history[1];
+      const was = prev && r2(prev.price) !== r2(e.price)
+        ? `<div class="was-tag ${e.price > prev.price ? "up" : "down"}">${e.price > prev.price ? "▲" : "▼"} was ${rupee(prev.price)}</div>` : "";
+      return `<div class="history-item" data-key="${escapeHtml(e.key)}">
+        <div class="hi-left" style="min-width:0;">
+          <b style="font-family:var(--sans);">${escapeHtml(e.name)}</b>
+          <div>${escapeHtml(supplierNameOf(e))} · ${fmtDate(e.date)}${e.history.length > 1 ? ` · bought ${e.history.length} times` : ""}</div>
+        </div>
+        <div style="flex-shrink:0; margin-left:10px;"><div class="hi-right">${rupee(e.price)}</div>${was}</div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".history-item").forEach(el => el.onclick = () => openPriceHistory(el.dataset.key));
+  }
+  $("priceSearch").oninput = renderPrices;
+
+  function openPriceHistory(key){
+    const e = priceList.get(key);
+    if (!e) return;
+    $("ph-title").textContent = e.name;
+    $("ph-list").innerHTML = e.history.map((h, i) => `
+      <div class="ledger-row">
+        <div class="lg-info" data-pid="${h.purchaseId}">
+          <div class="lg-t1">${escapeHtml(supplierNameOf(h))}${i === 0 ? ` <span style="font-size:11px; color:var(--accent-dark);">· latest</span>` : ""}</div>
+          <div class="lg-t2">${fmtDate(h.date)} · tap to open the purchase</div>
+        </div>
+        <div class="lg-amt">${rupee(h.price)}</div>
+      </div>`).join("");
+    $("ph-list").querySelectorAll("[data-pid]").forEach(el => el.onclick = () => {
+      const p = purchases.find(x => x.id === el.dataset.pid);
+      if (p){ closeModal("modalPriceHist"); loadPurchaseIntoForm(p); }
+    });
+    openModal("modalPriceHist");
+  }
+  $("ph-close").onclick = () => closeModal("modalPriceHist");
 
   // =====================================================================
   // Suppliers & account sheet
