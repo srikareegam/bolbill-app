@@ -6,7 +6,7 @@
 //   entry  — the product from buildCatalog(), or null for a product with no prices yet
 //   history: true shows the invoice price history; tapping a line calls onOpenPurchase(purchaseId)
 
-import { saveProductPrices } from "./data.js";
+import { saveProductPrices, deleteProduct } from "./data.js";
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 const rupee = (n) => "₹" + r2(n).toFixed(2).replace(/\.00$/, "");
@@ -34,6 +34,7 @@ export function mountProductEditor({ shopCode, toast, onOpenPurchase }){
         <button class="btn btn-ghost pe-cancel">Cancel</button>
         <button class="btn btn-primary pe-save">Save prices</button>
       </div>
+      <button class="icon-btn pe-delete" style="display:block; margin:14px auto 0; color:var(--danger);">🗑 Delete product</button>
     </div>`;
   document.body.appendChild(root);
   const q = (sel) => root.querySelector(sel);
@@ -86,6 +87,22 @@ export function mountProductEditor({ shopCode, toast, onOpenPurchase }){
   function close(){ root.classList.add("hidden"); }
   q(".pe-cancel").onclick = close;
 
+  q(".pe-delete").onclick = async () => {
+    if (!current) return;
+    const bought = (current.history || []).length;
+    const note = bought
+      ? (bought === 1
+          ? `\n\nYour past purchase of it stays as it is. If a new invoice has it again, it comes back.`
+          : `\n\nYour ${bought} past purchases of it stay as they are. If a new invoice has it again, it comes back.`)
+      : "";
+    if (!confirm(`Delete “${current.name}”? Its prices are removed and it leaves the Prices list and bill suggestions.${note}`)) return;
+    try{
+      await deleteProduct(shopCode, current.name, bought > 0);
+      toast(`${current.name} deleted`);
+      close();
+    }catch(e){ console.error(e); toast("Couldn't delete — check your connection"); }
+  };
+
   q(".pe-save").onclick = async () => {
     if (!check()) return;
     const name = current ? current.name : q(".pe-name").value.trim();
@@ -109,6 +126,7 @@ export function mountProductEditor({ shopCode, toast, onOpenPurchase }){
       current = entry || null;
       q(".pe-title").textContent = current ? current.name : "New product prices";
       q(".pe-name-field").style.display = current ? "none" : "block";
+      q(".pe-delete").style.display = current ? "block" : "none";
       q(".pe-name").value = current ? "" : (name || "");
       const set = (sel, v) => { q(sel).value = v == null ? "" : v; };
       set(".pe-mrp", current && current.mrp);

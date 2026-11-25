@@ -261,6 +261,7 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged)
   const data = {
     key, name: String(name).trim(),
     mrp: priceOrNull(prices.mrp), sellPrice: priceOrNull(prices.sellPrice), minPrice: priceOrNull(prices.minPrice),
+    deletedAt: null,                 // setting prices again brings a deleted product back
     updatedAt: serverTimestamp()
   };
   if (purchaseChanged) {
@@ -268,6 +269,20 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged)
     data.purchaseSetAt = Date.now();
   }
   await setDoc(doc(db, "shops", shopCode, "products", key), data, { merge: true });
+}
+
+// Delete a product: its prices go, and it leaves the Prices list and bill suggestions.
+// Past purchases are never touched. If it was on invoices, a marker remembers the delete,
+// and the product comes back by itself only when a newer invoice includes it again.
+export async function deleteProduct(shopCode, name, hasInvoices) {
+  const key = productKey(name);
+  const ref = doc(db, "shops", shopCode, "products", key);
+  if (!hasInvoices) { await deleteDoc(ref); return; }
+  await setDoc(ref, {
+    key, name: String(name).trim(),
+    mrp: null, sellPrice: null, minPrice: null, purchasePrice: null, purchaseSetAt: null,
+    deletedAt: Date.now(), updatedAt: serverTimestamp()
+  });
 }
 
 // Every product with its four prices: Map(key -> { key, name, mrp, sellPrice, minPrice,
@@ -280,6 +295,7 @@ export function buildCatalog(purchases, productDocs) {
   new Set([...invoices.keys(), ...docs.keys()]).forEach(key => {
     if (!key) return;
     const inv = invoices.get(key), d = docs.get(key) || {};
+    if (d.deletedAt && !(inv && inv.savedAt > d.deletedAt)) return;   // deleted, and not bought again since
     const manual = priceOrNull(d.purchasePrice);
     let purchase = null;
     if (inv && (manual == null || inv.savedAt > (d.purchaseSetAt || 0))) {
