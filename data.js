@@ -131,6 +131,10 @@ export async function addSupplier(shopCode, { name, phone = "", gstin = "" }) {
 export async function updateSupplier(shopCode, supplierId, fields) {
   await updateDoc(doc(db, "shops", shopCode, "suppliers", supplierId), fields);
 }
+// The Purchase page only allows this once the supplier has no purchases or payments left.
+export async function deleteSupplier(shopCode, supplierId) {
+  await deleteDoc(doc(db, "shops", shopCode, "suppliers", supplierId));
+}
 
 export function subscribePurchases(shopCode, cb) {
   return subscribeCol(shopCode, "purchases", cb, "invoiceDate");

@@ -264,6 +264,7 @@
     </div>
     <div class="card" id="lg-list" style="padding:4px 14px;"></div>
     <button class="btn btn-ghost btn-full" id="lg-close" style="margin-top:12px;">Close</button>
+    <button class="icon-btn" id="lg-delete" style="display:block; margin:14px auto 0; color:var(--danger);">🗑 Delete supplier</button>
   </div>
 </div>
 
@@ -303,7 +304,7 @@
 <script type="module">
 import {
   requireShopOrRedirect, subscribeSettings, todayKey,
-  subscribeSuppliers, addSupplier, updateSupplier,
+  subscribeSuppliers, addSupplier, updateSupplier, deleteSupplier,
   subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
   subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
   computeSupplierBalances, productKey, buildPriceList, findPriceMatches
@@ -1069,6 +1070,27 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   }
   $("lg-close").onclick = () => { closeModal("modalLedger"); ledgerSupplierId = null; };
   $("lg-edit").onclick = () => openSupplierModal(supplierById(ledgerSupplierId));
+
+  // A supplier can only be deleted once nothing refers to it — otherwise their purchases
+  // and dues would lose their supplier. The message says exactly what to clear first.
+  $("lg-delete").onclick = async () => {
+    const s = supplierById(ledgerSupplierId);
+    if (!s) return;
+    const nPur = purchases.filter(p => p.supplierId === s.id).length;
+    const nPay = payments.filter(p => p.supplierId === s.id).length;
+    if (nPur || nPay){
+      const parts = [nPur ? `${nPur} purchase${nPur !== 1 ? "s" : ""}` : "", nPay ? `${nPay} payment${nPay !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ");
+      alert(`${s.name} still has ${parts}.\n\nDelete those first (tap each one in the list above), then you can delete the supplier.`);
+      return;
+    }
+    if (!confirm(`Delete supplier “${s.name}”? This can't be undone.`)) return;
+    try{
+      await deleteSupplier(shop.shopCode, s.id);
+      closeModal("modalLedger");
+      ledgerSupplierId = null;
+      toast(`${s.name} deleted`);
+    }catch(e){ console.error(e); toast("Couldn't delete — check your connection"); }
+  };
 
   // ---------- Add / edit supplier ----------
   let supplierModalEditing = null;
