@@ -156,8 +156,9 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, buildPriceList, findPriceMatches } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey } from "./data.js";
 import { mountCalculator } from "./calc.js";
+import { mountProductEditor } from "./product-editor.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -261,25 +262,73 @@ if (shop) {
   let allCustomers = [];
   subscribeCustomers(shop.shopCode, (list) => { allCustomers = list; });
 
-  // ---------- Latest purchase price hints (from the Purchase page) ----------
-  // Only a hint: shows what the product was last bought for. The selling price is still typed by hand.
-  let priceList = new Map();
+  // ---------- Product prices: MRP / bought / selling / lowest (set on the Purchase page or via ✎) ----------
+  // A known product's selling price fills the price box (tinted, still changeable) and the other prices
+  // show underneath. Billing below the lowest (non-negotiable) price shows a red warning but is allowed.
+  let purchasesForPrices = [], productDocs = [];
+  let catalog = new Map();
   const hintRefreshers = [];
-  subscribePurchases(shop.shopCode, (rows) => { priceList = buildPriceList(rows); hintRefreshers.forEach(f => f()); });
-  const shortDate = (key) => key ? new Date(key + "T00:00:00").toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) : "";
-  function priceHintHtml(name){
-    const { exact, matches } = findPriceMatches(priceList, name, 3);
-    if (exact) return `📦 Bought at <b>${rupee(exact.price)}</b> · ${escapeHtml(exact.supplierName || "")} · ${shortDate(exact.date)}`;
-    return matches.map(m => `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)} · ${rupee(m.price)}</button>`).join("");
+  const rebuildCatalog = () => { catalog = buildCatalog(purchasesForPrices, productDocs); hintRefreshers.forEach(f => f()); };
+  subscribePurchases(shop.shopCode, (rows) => { purchasesForPrices = rows; rebuildCatalog(); });
+  subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; rebuildCatalog(); });
+  const money = (n) => "₹" + (Math.round(n*100)/100).toFixed(2).replace(/\.00$/, "");
+  const productEditor = mountProductEditor({ shopCode: shop.shopCode, toast });
+
+  // price: what's in the price box, for the below-lowest warning; null where there is no price box (calculator).
+  function priceHintHtml(name, price = null){
+    const { exact, matches } = findPriceMatches(catalog, name, 3);
+    if (exact){
+      const bits = [];
+      if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
+      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>`);
+      if (exact.sellPrice && price == null) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
+      if (exact.minPrice) bits.push(`Lowest <b>${money(exact.minPrice)}</b>`);
+      let html = `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
+      if (exact.minPrice && price > 0 && price < exact.minPrice) html += `<span class="warn">⚠ Below your lowest price ${money(exact.minPrice)}</span>`;
+      return html;
+    }
+    if (matches.length){
+      return matches.map(m => {
+        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) : "");
+        return `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag ? " · " + tag : ""}</button>`;
+      }).join("");
+    }
+    const typed = name.trim();
+    if (productKey(typed).length >= 2) return `<button type="button" class="ph-edit-link" data-edit-name="${escapeHtml(typed)}">✎ Set prices for “${escapeHtml(typed)}”</button>`;
+    return "";
   }
-  // Tapping a suggestion fills the product name only — never the price.
-  function attachPriceHint(inputId, hintId, modalId){
-    const update = () => { $(hintId).innerHTML = priceHintHtml($(inputId).value); };
-    $(inputId).addEventListener("input", update);
+  // ✎ anywhere (manual, voice, calculator) opens that product's prices
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-edit-name]");
+    if (!btn) return;
+    productEditor.open(btn.dataset.editName, catalog.get(productKey(btn.dataset.editName)) || null);
+  });
+
+  // Tapping a suggestion fills the product name; the selling price then fills in as for a typed name.
+  function attachPriceHint(inputId, hintId, modalId, priceId){
+    const nameEl = $(inputId), priceEl = $(priceId);
+    // The box counts as auto-filled only while it still shows exactly what the app put there,
+    // so a price the user typed (or said, in voice mode) is never overwritten.
+    const isAuto = () => priceEl.dataset.autoVal != null && priceEl.value === priceEl.dataset.autoVal;
+    const update = () => {
+      const { exact } = findPriceMatches(catalog, nameEl.value, 1);
+      const empty = !(Number(priceEl.value) > 0);
+      if (exact && exact.sellPrice && (empty || isAuto())){
+        priceEl.value = String(exact.sellPrice);
+        priceEl.dataset.autoVal = priceEl.value;
+      } else if (isAuto() && !(exact && exact.sellPrice)){
+        priceEl.value = "";              // name changed away from that product: take its price back out
+        delete priceEl.dataset.autoVal;
+      }
+      priceEl.classList.toggle("autofilled", isAuto());
+      $(hintId).innerHTML = priceHintHtml(nameEl.value, Number(priceEl.value) || 0);
+    };
+    nameEl.addEventListener("input", update);
+    priceEl.addEventListener("input", update);   // re-checks the below-lowest warning as the price is typed
     $(hintId).addEventListener("click", (e) => {
       const chip = e.target.closest("[data-fill]");
       if (!chip) return;
-      $(inputId).value = chip.dataset.fill;
+      nameEl.value = chip.dataset.fill;
       update();
     });
     // the modal is opened from several places (manual add, editing a row, voice); refresh whenever it shows
@@ -287,8 +336,8 @@ if (shop) {
       .observe($(modalId), { attributes: true, attributeFilter: ["class"] });
     hintRefreshers.push(update);
   }
-  attachPriceHint("m-name", "m-hint", "modalManual");
-  attachPriceHint("v-name", "v-hint", "modalVoice");
+  attachPriceHint("m-name", "m-hint", "modalManual", "m-price");
+  attachPriceHint("v-name", "v-hint", "modalVoice", "v-price");
 
   function renderCustomerSuggestions(query){
     const box = $("customerSuggestions");
@@ -351,7 +400,7 @@ if (shop) {
     renderItems();
   };
   const calc = mountCalculator({
-    nameHint: priceHintHtml,
+    nameHint: (name) => priceHintHtml(name),
     sub: "Type qty, tap ×, type price — add each item, then print",
     finishLabel: "🖨 Add & Print Bill",
     toast,

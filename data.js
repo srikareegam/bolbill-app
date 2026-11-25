@@ -222,10 +222,11 @@ export function buildPriceList(purchases) {
   const ordered = purchases.slice().sort((a, b) =>
     (a.invoiceDate || "").localeCompare(b.invoiceDate || "") || ms(a) - ms(b));
   const list = new Map();
+  const savedMs = (p) => (p.updatedAt && p.updatedAt.toMillis) ? p.updatedAt.toMillis() : ms(p);
   ordered.forEach(p => (p.items || []).forEach(it => {
     const key = productKey(it.name);
     if (!key) return;
-    const entry = { price: it.price, date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id };
+    const entry = { price: it.price, date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id, savedAt: savedMs(p) };
     const prev = list.get(key);
     const history = prev ? [entry, ...prev.history] : [entry];
     list.set(key, Object.assign({ key, name: it.name }, entry, { history }));
@@ -245,6 +246,56 @@ export function findPriceMatches(priceList, typed, limit = 3) {
     .sort((a, b) => a.key.localeCompare(b.key))
     .slice(0, limit);
   return { exact: null, matches };
+}
+
+// ---------- Products: MRP, purchase, selling and lowest (non-negotiable) price ----------
+// One doc per product, id = productKey(name), so spelling variants share one set of prices.
+export function subscribeProducts(shopCode, cb) {
+  return subscribeCol(shopCode, "products", cb);
+}
+const priceOrNull = (v) => (v === "" || v == null || !(Number(v) > 0)) ? null : Math.round(Number(v) * 100) / 100;
+// purchaseChanged: the purchase price was typed by hand — it then wins until the next invoice.
+export async function saveProductPrices(shopCode, name, prices, purchaseChanged) {
+  const key = productKey(name);
+  if (!key) throw new Error("The product needs a name");
+  const data = {
+    key, name: String(name).trim(),
+    mrp: priceOrNull(prices.mrp), sellPrice: priceOrNull(prices.sellPrice), minPrice: priceOrNull(prices.minPrice),
+    updatedAt: serverTimestamp()
+  };
+  if (purchaseChanged) {
+    data.purchasePrice = priceOrNull(prices.purchasePrice);
+    data.purchaseSetAt = Date.now();
+  }
+  await setDoc(doc(db, "shops", shopCode, "products", key), data, { merge: true });
+}
+
+// Every product with its four prices: Map(key -> { key, name, mrp, sellPrice, minPrice,
+//   purchase: { price, date, supplierName, supplierId, fromInvoice } | null, prevInvoicePrice, history[] }).
+// Purchase price = whichever was entered last: the newest invoice line, or a price typed by hand.
+export function buildCatalog(purchases, productDocs) {
+  const invoices = buildPriceList(purchases);
+  const docs = new Map(productDocs.map(d => [d.key || productKey(d.name), d]));
+  const catalog = new Map();
+  new Set([...invoices.keys(), ...docs.keys()]).forEach(key => {
+    if (!key) return;
+    const inv = invoices.get(key), d = docs.get(key) || {};
+    const manual = priceOrNull(d.purchasePrice);
+    let purchase = null;
+    if (inv && (manual == null || inv.savedAt > (d.purchaseSetAt || 0))) {
+      purchase = { price: inv.price, date: inv.date, supplierName: inv.supplierName, supplierId: inv.supplierId, fromInvoice: true };
+    } else if (manual != null) {
+      purchase = { price: manual, date: d.purchaseSetAt ? todayKey(new Date(d.purchaseSetAt)) : "", fromInvoice: false };
+    }
+    catalog.set(key, {
+      key, name: d.name || (inv && inv.name) || key,
+      mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice), minPrice: priceOrNull(d.minPrice),
+      purchase,
+      prevInvoicePrice: inv && inv.history[1] ? inv.history[1].price : null,
+      history: inv ? inv.history : []
+    });
+  });
+  return catalog;
 }
 
 // ---------- Customer directory (for name -> phone autofill) ----------
