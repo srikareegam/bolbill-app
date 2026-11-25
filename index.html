@@ -268,11 +268,12 @@ if (shop) {
   let purchasesForPrices = [], productDocs = [];
   let catalog = new Map();
   const hintRefreshers = [];
+  const money = (n) => "₹" + (Math.round(n*100)/100).toFixed(2).replace(/\.00$/, "");
+  // ✎ on the bill goes straight to editing; changes are saved to the product's price history as "on the bill"
+  const productEditor = mountProductEditor({ shopCode: shop.shopCode, toast, via: "bill", lookup: (key) => catalog.get(key) });
   const rebuildCatalog = () => { catalog = buildCatalog(purchasesForPrices, productDocs); hintRefreshers.forEach(f => f()); };
   subscribePurchases(shop.shopCode, (rows) => { purchasesForPrices = rows; rebuildCatalog(); });
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; rebuildCatalog(); });
-  const money = (n) => "₹" + (Math.round(n*100)/100).toFixed(2).replace(/\.00$/, "");
-  const productEditor = mountProductEditor({ shopCode: shop.shopCode, toast });
 
   // price: what's in the price box, for the below-lowest warning; null where there is no price box (calculator).
   function priceHintHtml(name, price = null){
@@ -301,7 +302,7 @@ if (shop) {
   document.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-edit-name]");
     if (!btn) return;
-    productEditor.open(btn.dataset.editName, catalog.get(productKey(btn.dataset.editName)) || null);
+    productEditor.open(btn.dataset.editName, catalog.get(productKey(btn.dataset.editName)) || null, { mode: "edit" });
   });
 
   // Tapping a suggestion fills the product name; the selling price then fills in as for a typed name.

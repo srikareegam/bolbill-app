@@ -3,7 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
   collection, onSnapshot, query, orderBy, where, getDocs,
-  serverTimestamp, runTransaction, writeBatch
+  serverTimestamp, runTransaction, writeBatch, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -255,7 +255,10 @@ export function subscribeProducts(shopCode, cb) {
 }
 const priceOrNull = (v) => (v === "" || v == null || !(Number(v) > 0)) ? null : Math.round(Number(v) * 100) / 100;
 // purchaseChanged: the purchase price was typed by hand — it then wins until the next invoice.
-export async function saveProductPrices(shopCode, name, prices, purchaseChanged) {
+// before: the product as it was (from buildCatalog), so the change can be written to its price history.
+// via: where it was changed — "bill" or "prices".
+// Every save that changes a price adds one entry to `changes`: { at, via, diff: { sellPrice: { from, to }, … } }.
+export async function saveProductPrices(shopCode, name, prices, purchaseChanged, { before = null, via = "" } = {}) {
   const key = productKey(name);
   if (!key) throw new Error("The product needs a name");
   const data = {
@@ -268,21 +271,33 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged)
     data.purchasePrice = priceOrNull(prices.purchasePrice);
     data.purchaseSetAt = Date.now();
   }
+  const old = {
+    mrp: before ? before.mrp : null, sellPrice: before ? before.sellPrice : null, minPrice: before ? before.minPrice : null,
+    purchasePrice: before && before.purchase ? before.purchase.price : null
+  };
+  const diff = {};
+  ["mrp", "purchasePrice", "sellPrice", "minPrice"].forEach(f => {
+    if (!(f in data)) return;                          // purchase price not touched
+    const from = old[f] ?? null, to = data[f] ?? null;
+    if (from !== to) diff[f] = { from, to };
+  });
+  if (Object.keys(diff).length) data.changes = arrayUnion({ at: Date.now(), via, diff });
   await setDoc(doc(db, "shops", shopCode, "products", key), data, { merge: true });
 }
 
 // Delete a product: its prices go, and it leaves the Prices list and bill suggestions.
-// Past purchases are never touched. If it was on invoices, a marker remembers the delete,
-// and the product comes back by itself only when a newer invoice includes it again.
-export async function deleteProduct(shopCode, name, hasInvoices) {
+// Past purchases are never touched. If it was on invoices, a marker remembers the delete (and keeps
+// the price history), and the product comes back by itself only when a newer invoice includes it again.
+export async function deleteProduct(shopCode, name, hasInvoices, via = "") {
   const key = productKey(name);
   const ref = doc(db, "shops", shopCode, "products", key);
   if (!hasInvoices) { await deleteDoc(ref); return; }
   await setDoc(ref, {
     key, name: String(name).trim(),
     mrp: null, sellPrice: null, minPrice: null, purchasePrice: null, purchaseSetAt: null,
-    deletedAt: Date.now(), updatedAt: serverTimestamp()
-  });
+    deletedAt: Date.now(), updatedAt: serverTimestamp(),
+    changes: arrayUnion({ at: Date.now(), via, deleted: true })
+  }, { merge: true });
 }
 
 // Every product with its four prices: Map(key -> { key, name, mrp, sellPrice, minPrice,
@@ -308,7 +323,8 @@ export function buildCatalog(purchases, productDocs) {
       mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice), minPrice: priceOrNull(d.minPrice),
       purchase,
       prevInvoicePrice: inv && inv.history[1] ? inv.history[1].price : null,
-      history: inv ? inv.history : []
+      history: inv ? inv.history : [],          // invoice lines, newest first
+      changes: Array.isArray(d.changes) ? d.changes : []   // hand edits to the prices, oldest first
     });
   });
   return catalog;

@@ -346,6 +346,7 @@ if (shop) {
   let priceList = new Map();     // latest invoice price per product (built from purchases)
   let productDocs = [];          // the four prices the shopkeeper set per product
   let catalog = new Map();       // both combined — what the Prices tab shows
+  let productEditor = null;      // the price sheet (product-editor.js), set up further down
   let ledgerSupplierId = null;   // supplier whose account sheet is open
   let histFilter = "today";
   const supplierById = (id) => suppliers.find(s => s.id === id);
@@ -371,6 +372,7 @@ if (shop) {
     renderSuppliers();
     renderPrices();
     refreshProductHints();
+    if (productEditor) productEditor.refresh();   // an open price sheet shows the latest prices
     if (ledgerSupplierId) renderLedger();
   }
 
@@ -966,16 +968,17 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     }).join("");
     box.querySelectorAll(".history-item").forEach(el => el.onclick = () => {
       const e = catalog.get(el.dataset.key);
-      if (e) productEditor.open(e.name, e, { history: true });
+      if (e) productEditor.open(e.name, e, { mode: "view" });   // prices, "✎ Edit prices" and the history
     });
   }
   $("priceSearch").oninput = renderPrices;
 
-  const productEditor = mountProductEditor({
-    shopCode: shop.shopCode, toast,
+  productEditor = mountProductEditor({
+    shopCode: shop.shopCode, toast, via: "prices",
+    lookup: (key) => catalog.get(key),
     onOpenPurchase: (id) => { const p = purchases.find(x => x.id === id); if (p) loadPurchaseIntoForm(p); }
   });
-  $("btnNewProduct").onclick = () => productEditor.open($("priceSearch").value.trim(), null);
+  $("btnNewProduct").onclick = () => productEditor.open($("priceSearch").value.trim(), null, { mode: "edit" });
 
   // =====================================================================
   // Suppliers & account sheet
