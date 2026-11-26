@@ -45,7 +45,8 @@
 <script type="module">
 import {
   requireShopOrRedirect, subscribePurchases, subscribeProducts, subscribeSuppliers,
-  buildCatalog, productKey, unitLabel, unitPriceText, samePack, offerText
+  buildCatalog, productKey, unitLabel, unitPriceText, samePack, offerText,
+  effectivePack, effectivePackUnit
 } from "./data.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -78,6 +79,8 @@ if (shop) {
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; refresh(); });
   subscribeSuppliers(shop.shopCode, (rows) => { suppliers = rows; refresh(); });
 
+  // selling price of a pack product, per kg / per piece inside the pack ("₹92.31/kg")
+  const sellEach = (e) => e.sellPrice ? unitPriceText(e.sellPrice, effectivePack(e), effectivePackUnit(e)) : "";
   function renderPrices(){
     const typed = $("priceSearch").value;
     const words = productKey(typed).split(" ").filter(Boolean);
@@ -106,7 +109,7 @@ if (shop) {
           <div>${bits.join(" · ") || (e.sellPrice ? "Only selling price set" : "No prices yet")}</div>
         </div>
         <div style="flex-shrink:0; margin-left:10px;">
-          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div>` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
+          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div>${sellEach(e) ? `<div class="ok-tag" style="font-size:11.5px;">${sellEach(e)}</div>` : ""}` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
           ${was}
         </div>
       </div>`;

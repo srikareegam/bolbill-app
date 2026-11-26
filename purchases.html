@@ -330,7 +330,7 @@ import {
   computeSupplierBalances, productKey, buildPriceList, findPriceMatches,
   packOrNull, unitLabel, samePack, effectivePack, effectivePackType,
   PACK_TYPES, packTypeOf, packText, offerOrNull, offerText,
-  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit,
+  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit, lineUnit,
   subscribeProducts, buildCatalog
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
@@ -836,8 +836,11 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   // "last ₹1250 / bag of 25 · Sri Balaji · 20 Nov  ▲ ₹50" — the change only shows for the same pack.
   function renderProductHint(el, it){
     const box = el.querySelector(".prod-hint");
-    const last = priceListForForm().get(productKey(it.name));
-    if (!last){ box.innerHTML = ""; return; }
+    const key = productKey(it.name);
+    const found = priceListForForm().get(key);
+    if (!found){ box.innerHTML = ""; return; }
+    // read the last line's unit through the product's own pack setting (an old "bag of 26" is 26 kg)
+    const last = Object.assign({}, found, { packUnit: lineUnit(found, catalog.get(key)) });
     const now = r2(it.price), was = r2(last.price);
     let change = "";
     if (now > 0 && now !== was && samePack(last.perCase, rowPack(it), last.packType, rowPackType(it), last.packUnit, rowPackUnit(it))){
@@ -855,7 +858,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     box.innerHTML = matches.map(m => `
       <div class="autocomplete-item" data-key="${escapeHtml(m.key)}">
         <div class="ac-name">${escapeHtml(m.name)}</div>
-        <div class="ac-phone">last ${rupee(m.price)}${escapeHtml(unitLabel(m.perCase, m.packType, m.packUnit))} · ${escapeHtml(supplierNameOf(m))}</div>
+        <div class="ac-phone">last ${rupee(m.price)}${escapeHtml(unitLabel(m.perCase, m.packType, lineUnit(m, catalog.get(m.key))))} · ${escapeHtml(supplierNameOf(m))}</div>
       </div>`).join("");
     box.classList.remove("hidden");
     box.querySelectorAll(".autocomplete-item").forEach(opt => {

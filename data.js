@@ -435,14 +435,29 @@ export async function deleteProduct(shopCode, name, hasInvoices, via = "") {
 //   purchase: { price, perCase, packType, packUnit, offer, date, supplierName, supplierId, fromInvoice } | null,
 //   prevInvoice, prevInvoicePrice, history[], changes[] }).
 // Purchase price = whichever was entered last: the newest invoice line, or a price typed by hand.
+// What a purchase line's pack holds (kg, pcs, …). When the product's own pack setting is the same
+// kind and size of pack, its unit wins: an invoice line saved before units existed (or left on the
+// default "pcs") for a product set as "bag of 26 kg" is read as 26 kg, so it gives ₹/kg, not ₹/pc.
+export function lineUnit(line, product) {
+  if (!line || !packOrNull(line.perCase)) return null;
+  if (product && product.packSet && product.pack === packOrNull(line.perCase) &&
+      packTypeOf(product.packType) === packTypeOf(line.packType)) return packUnitOf(product.packUnit);
+  return packUnitOf(line.packUnit);
+}
+
 export function buildCatalog(purchases, productDocs) {
   const invoices = buildPriceList(purchases);
   const docs = new Map(productDocs.map(d => [d.key || productKey(d.name), d]));
   const catalog = new Map();
   new Set([...invoices.keys(), ...docs.keys()]).forEach(key => {
     if (!key) return;
-    const inv = invoices.get(key), d = docs.get(key) || {};
-    if (d.deletedAt && !(inv && inv.savedAt > d.deletedAt)) return;   // deleted, and not bought again since
+    const raw = invoices.get(key), d = docs.get(key) || {};
+    if (d.deletedAt && !(raw && raw.savedAt > d.deletedAt)) return;   // deleted, and not bought again since
+    // the product's own pack setting, used to read the unit of its invoice lines
+    const detail = { pack: packOrNull(d.perCase), packType: packOrNull(d.perCase) ? packTypeOf(d.packType) : null,
+                     packUnit: packOrNull(d.perCase) ? packUnitOf(d.packUnit) : null, packSet: "perCase" in d };
+    const fixUnit = (line) => Object.assign({}, line, { packUnit: lineUnit(line, detail) });
+    const inv = raw ? Object.assign(fixUnit(raw), { history: raw.history.map(fixUnit) }) : null;
     const manual = priceOrNull(d.purchasePrice);
     let purchase = null;
     if (inv && (manual == null || inv.savedAt > (d.purchaseSetAt || 0))) {
@@ -454,9 +469,8 @@ export function buildCatalog(purchases, productDocs) {
     catalog.set(key, {
       key, name: d.name || (inv && inv.name) || key,
       mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice),
-      // product detail: how many in the pack (null = loose) and which kind of pack
-      pack: packOrNull(d.perCase), packType: packOrNull(d.perCase) ? packTypeOf(d.packType) : null,
-      packUnit: packOrNull(d.perCase) ? packUnitOf(d.packUnit) : null, packSet: "perCase" in d,
+      // product detail: how much is in the pack (null = loose), which kind of pack, and what it counts
+      ...detail,
       purchase,
       prevInvoice: inv && inv.history[1] ? inv.history[1] : null,
       prevInvoicePrice: inv && inv.history[1] ? inv.history[1].price : null,

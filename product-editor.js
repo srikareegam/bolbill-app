@@ -108,22 +108,32 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     q(".pe-title").textContent = current.name;
     q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current), effectivePackType(current), effectivePackUnit(current))}</b>`;
     const p = current.purchase;
-    const tile = (field, value, note, wide) => `
+    // For a pack product every price shows twice, separately: the whole pack (₹2275 / bag) and the
+    // individual price inside it (₹87.50/kg). pack = { perCase, type, unit } that price is for.
+    const tile = (field, value, note, pack, wide) => {
+      const per = pack && packOrNull(pack.perCase);
+      const each = per && value != null ? unitPriceText(value, pack.perCase, pack.unit) : "";
+      return `
       <div class="pe-tile${field === "sellPrice" ? " main" : ""}"${wide ? ' style="grid-column:span 2;"' : ""}>
         <div class="pe-tlabel">${LABEL[field]}</div>
         <div class="pe-tval">${value != null ? money(value) : "—"}</div>
+        ${per && value != null ? `<div class="pe-tper">per ${escapeHtml(packText(pack.perCase, pack.type, pack.unit))}</div>` : ""}
+        ${each ? `<div class="pe-teach">${escapeHtml(each)}</div>` : ""}
         <div class="pe-tnote">${value != null && note ? note : (value == null ? "not set" : "&nbsp;")}</div>
       </div>`;
+    };
     const since = (field) => { const at = lastChangedAt(field); return at ? "since " + fmtWhen(at) : ""; };
-    // "bag of 25 kg · ₹50/kg · " — the pack and the individual price inside it
-    const packBit = p && packOrNull(p.perCase) ? `${packText(p.perCase, p.packType, p.packUnit)} · ${unitPriceText(p.price, p.perCase, p.packUnit)} · ` : "";
-    const buyNote = !p ? "" : packBit + (p.fromInvoice
+    const buyNote = !p ? "" : p.fromInvoice
       ? `invoice · ${escapeHtml(p.supplierName || "")} · ${fmtDate(p.date)}`
-      : (since("purchasePrice") ? "by hand · " + since("purchasePrice").replace("since ", "") : "by hand"));
+      : (since("purchasePrice") ? "by hand · " + since("purchasePrice").replace("since ", "") : "by hand");
+    // selling price and MRP are for the product's usual pack; the purchase price for the pack it was bought in
+    const productPack = effectivePack(current)
+      ? { perCase: effectivePack(current), type: effectivePackType(current), unit: effectivePackUnit(current) } : null;
+    const buyPack = p && packOrNull(p.perCase) ? { perCase: p.perCase, type: p.packType, unit: p.packUnit } : null;
     q(".pe-tiles").innerHTML =
-      tile("sellPrice", current.sellPrice, since("sellPrice"), true) +
-      tile("mrp", current.mrp, since("mrp")) +
-      tile("purchasePrice", p ? p.price : null, buyNote);
+      tile("sellPrice", current.sellPrice, since("sellPrice"), productPack, true) +
+      tile("mrp", current.mrp, since("mrp"), productPack) +
+      tile("purchasePrice", p ? p.price : null, buyNote, buyPack);
     renderTimeline();
   }
 
