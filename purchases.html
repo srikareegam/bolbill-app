@@ -327,10 +327,10 @@ import {
   subscribeSuppliers, addSupplier, updateSupplier, deleteSupplier,
   subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
   subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
-  computeSupplierBalances, productKey, buildPriceList, findPriceMatches,
+  computeSupplierBalances, productKey, findPriceMatches,
   packOrNull, unitLabel, samePack, effectivePack, effectivePackType,
   PACK_TYPES, packTypeOf, packText, offerOrNull, offerText,
-  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit, lineUnit,
+  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit,
   subscribeProducts, buildCatalog
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
@@ -373,7 +373,6 @@ if (shop) {
   let settings = {};
   let suppliers = [], purchases = [], payments = [];
   let balances = {};
-  let priceList = new Map();     // latest invoice price per product (built from purchases)
   let productDocs = [];          // the four prices the shopkeeper set per product
   let catalog = new Map();       // both combined — what the Prices tab shows
   let ledgerSupplierId = null;   // supplier whose account sheet is open
@@ -403,7 +402,6 @@ if (shop) {
 
   function refreshAll(){
     balances = computeSupplierBalances(purchases, payments);
-    priceList = buildPriceList(purchases);
     catalog = buildCatalog(purchases, productDocs);
     renderHistory();
     renderSuppliers();
@@ -734,7 +732,9 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   const newRowId = () => Date.now() + "_" + Math.random().toString(36).slice(2);
   const newRow = (fields = {}) => Object.assign({ id: newRowId(), name: "", price: "", mode: "loose", perCase: "", packUnit: "pcs", offerBuy: "", offerFree: "", showOffer: false, modeChosen: false, auto: false }, fields);
   // When editing, compare against the other purchases so "last ₹…" isn't this purchase's own price.
-  const priceListForForm = () => editingId ? buildPriceList(purchases.filter(p => p.id !== editingId)) : priceList;
+  // All known products: ones from past invoices and ones added in More → Products.
+  // When editing, this purchase is left out so "last ₹…" isn't its own price.
+  const catalogForForm = () => editingId ? buildCatalog(purchases.filter(p => p.id !== editingId), productDocs) : catalog;
   const rowPack = (it) => it.mode !== "loose" ? packOrNull(it.perCase) : null;
   const rowPackType = (it) => it.mode !== "loose" ? it.mode : null;
   const rowPackUnit = (it) => it.mode !== "loose" ? packUnitOf(it.packUnit) : null;
@@ -833,32 +833,37 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     it.packUnit = pack ? effectivePackUnit(known) : "pcs";
     showMode(el, it);
   }
-  // "last ₹1250 / bag of 25 · Sri Balaji · 20 Nov  ▲ ₹50" — the change only shows for the same pack.
+  // "last ₹1250 / bag of 25 kg (₹50/kg) · Sri Balaji · 20 Nov  ▲ ₹50" — the change only shows for the same pack.
+  // The purchase price can come from an invoice or have been set by hand in Products.
   function renderProductHint(el, it){
     const box = el.querySelector(".prod-hint");
-    const key = productKey(it.name);
-    const found = priceListForForm().get(key);
-    if (!found){ box.innerHTML = ""; return; }
-    // read the last line's unit through the product's own pack setting (an old "bag of 26" is 26 kg)
-    const last = Object.assign({}, found, { packUnit: lineUnit(found, catalog.get(key)) });
+    const entry = catalogForForm().get(productKey(it.name));
+    const last = entry && entry.purchase;
+    if (!last){ box.innerHTML = ""; return; }
     const now = r2(it.price), was = r2(last.price);
     let change = "";
     if (now > 0 && now !== was && samePack(last.perCase, rowPack(it), last.packType, rowPackType(it), last.packUnit, rowPackUnit(it))){
       change = now > was ? ` <span class="up">▲ ${rupee(now - was)}</span>` : ` <span class="down">▼ ${rupee(was - now)}</span>`;
     }
     const each = unitPriceText(last.price, last.perCase, last.packUnit);
-    box.innerHTML = `last ${rupee(was)}${escapeHtml(unitLabel(last.perCase, last.packType, last.packUnit))}${each ? ` (${each})` : ""} · ${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}${change}`;
+    const source = last.fromInvoice ? `${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}` : "set in Products";
+    box.innerHTML = `last ${rupee(was)}${escapeHtml(unitLabel(last.perCase, last.packType, last.packUnit))}${each ? ` (${each})` : ""} · ${source}${change}`;
   }
-  // Suggest products bought before, so the same product keeps the same name.
+  // Suggest known products (bought before or added in Products), so the same product keeps the same name.
   function renderProductSuggestions(el, it){
     const box = el.querySelector(".autocomplete-list");
-    const list = priceListForForm();
+    const list = catalogForForm();
     const { exact, matches } = findPriceMatches(list, it.name, 5);
     if (exact || !matches.length){ box.classList.add("hidden"); return; }
+    const sub = (m) => {
+      const p = m.purchase;
+      if (!p) return m.sellPrice ? `selling ${rupee(m.sellPrice)}` : "no prices yet";
+      return `last ${rupee(p.price)}${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))} · ${p.fromInvoice ? escapeHtml(supplierNameOf(p)) : "set in Products"}`;
+    };
     box.innerHTML = matches.map(m => `
       <div class="autocomplete-item" data-key="${escapeHtml(m.key)}">
         <div class="ac-name">${escapeHtml(m.name)}</div>
-        <div class="ac-phone">last ${rupee(m.price)}${escapeHtml(unitLabel(m.perCase, m.packType, lineUnit(m, catalog.get(m.key))))} · ${escapeHtml(supplierNameOf(m))}</div>
+        <div class="ac-phone">${sub(m)}</div>
       </div>`).join("");
     box.classList.remove("hidden");
     box.querySelectorAll(".autocomplete-item").forEach(opt => {
@@ -1007,7 +1012,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     if (total <= 0){ toast("Enter the invoice total"); $("totalIn").focus(); return; }
     if (error){ toast(error); return; }
     const items = [];
-    const known = priceListForForm();
+    const known = catalogForForm();
     for (const it of products){
       const typed = String(it.name ?? "").trim(), priceStr = String(it.price ?? "").trim();
       if (!typed && !priceStr) continue;                      // blank row: just drop it
