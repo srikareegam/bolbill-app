@@ -145,7 +145,8 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel, unitPriceText } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel, unitPriceText,
+  effectivePack, effectivePackType, effectivePackUnit, looseUnit } from "./data.js";
 import { mountCalculator } from "./calc.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -273,10 +274,23 @@ if (shop) {
   subscribePurchases(shop.shopCode, (rows) => { purchasesForPrices = rows; rebuildCatalog(); });
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; rebuildCatalog(); });
 
+  // A pack product (e.g. rice, bag of 26 kg) can be billed two ways: loose by the kg at its loose price,
+  // or as a whole bag at its bag price. sellModes() describes both buttons.
+  const capWord = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : "";
+  function sellModes(entry){
+    if (!entry || !effectivePack(entry)) return null;
+    return {
+      loose: { label: capWord(looseUnit(effectivePackUnit(entry))), unit: looseUnit(effectivePackUnit(entry)), price: entry.sellLoose },
+      pack:  { label: capWord(effectivePackType(entry)), unit: effectivePackType(entry), price: entry.sellPrice }
+    };
+  }
+
   // price: what's in the price box; null where there is no price box (calculator), so "Sell ₹…" is shown instead.
-  function priceHintHtml(name, price = null){
+  // mode: which way a pack product is being billed ("loose" | "pack"), to highlight its button.
+  function priceHintHtml(name, price = null, mode = null){
     const { exact, matches } = findPriceMatches(catalog, name, 3);
     if (exact){
+      const modes = sellModes(exact);
       const bits = [];
       if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
       if (exact.purchase){
@@ -284,8 +298,21 @@ if (shop) {
         // pack price and the individual price inside it: "Bought ₹1250 / bag of 25 kg · ₹50/kg"
         bits.push(`Bought <b>${money(p.price)}</b>${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))}${each ? ` · <b>${each}</b>` : ""}`);
       }
-      if (exact.sellPrice && price == null) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
-      return `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
+      if (price == null){
+        if (modes){
+          if (modes.loose.price) bits.push(`Sell <b>${money(modes.loose.price)}</b>/${modes.loose.unit}`);
+          if (modes.pack.price) bits.push(`<b>${money(modes.pack.price)}</b>/${modes.pack.unit}`);
+        } else if (exact.sellPrice) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
+      }
+      let html = `<span>📦 ${bits.join(" · ") || (exact.sellPrice || exact.sellLoose ? "Selling price filled in" : "No prices set yet")}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
+      if (modes && price != null){
+        const btn = (key) => {
+          const m = modes[key];
+          return `<button type="button" class="ph-mode${mode === key ? " on" : ""}" data-mode="${key}">${escapeHtml(m.label)} ${m.price ? money(m.price) : "— set ✎"}</button>`;
+        };
+        html += `<span class="ph-modes">Sell by: ${btn("loose")}${btn("pack")}</span>`;
+      }
+      return html;
     }
     if (matches.length){
       return matches.map(m => {
@@ -310,31 +337,45 @@ if (shop) {
     // The box counts as auto-filled only while it still shows exactly what the app put there,
     // so a price the user typed (or said, in voice mode) is never overwritten.
     const isAuto = () => priceEl.dataset.autoVal != null && priceEl.value === priceEl.dataset.autoVal;
-    const update = () => {
+    let mode = null, modeKey = null;   // how the current pack product is billed: "loose" (kg) or "pack" (bag)
+    const update = (force = false) => {
       const { exact } = findPriceMatches(catalog, nameEl.value, 1);
+      const modes = sellModes(exact);
+      if (!modes){ mode = null; modeKey = null; }
+      else if (modeKey !== exact.key){ modeKey = exact.key; mode = modes.loose.price ? "loose" : "pack"; }   // kg first
+      const target = modes ? modes[mode].price : (exact ? exact.sellPrice : null);
       const empty = !(Number(priceEl.value) > 0);
-      if (exact && exact.sellPrice && (empty || isAuto())){
-        priceEl.value = String(exact.sellPrice);
+      if (target && (empty || isAuto() || force)){
+        priceEl.value = String(target);
         priceEl.dataset.autoVal = priceEl.value;
-      } else if (isAuto() && !(exact && exact.sellPrice)){
+      } else if (isAuto() && !target){
         priceEl.value = "";              // name changed away from that product: take its price back out
         delete priceEl.dataset.autoVal;
       }
       priceEl.classList.toggle("autofilled", isAuto());
-      $(hintId).innerHTML = priceHintHtml(nameEl.value, Number(priceEl.value) || 0);
+      // the bill line says how it was sold: "Teja Rice 26kg (kg)" or "… (bag)"
+      nameEl.dataset.sellSuffix = modes ? ` (${modes[mode].unit})` : "";
+      $(hintId).innerHTML = priceHintHtml(nameEl.value, Number(priceEl.value) || 0, mode);
     };
-    nameEl.addEventListener("input", update);
-    priceEl.addEventListener("input", update);   // a typed price is no longer "auto-filled", so the tint goes
+    nameEl.addEventListener("input", () => update());
+    priceEl.addEventListener("input", () => update());   // a typed price is no longer "auto-filled", so the tint goes
     $(hintId).addEventListener("click", (e) => {
+      const modeBtn = e.target.closest("[data-mode]");
+      if (modeBtn){ mode = modeBtn.dataset.mode; update(true); return; }   // Kg / Bag: fill that price
       const chip = e.target.closest("[data-fill]");
       if (!chip) return;
       nameEl.value = chip.dataset.fill;
       update();
     });
     // the modal is opened from several places (manual add, editing a row, voice); refresh whenever it shows
-    new MutationObserver(() => { if (!$(modalId).classList.contains("hidden")) update(); })
+    new MutationObserver(() => { if (!$(modalId).classList.contains("hidden")){ modeKey = null; update(); } })
       .observe($(modalId), { attributes: true, attributeFilter: ["class"] });
-    hintRefreshers.push(update);
+    hintRefreshers.push(() => update());
+  }
+  // The item name for the bill, with how it was sold added for pack products ("… (kg)").
+  function billName(inputId, name){
+    const sfx = $(inputId).dataset.sellSuffix || "";
+    return sfx && !name.toLowerCase().endsWith(sfx.trim().toLowerCase()) ? name + sfx : name;
   }
   attachPriceHint("m-name", "m-hint", "modalManual", "m-price");
   attachPriceHint("v-name", "v-hint", "modalVoice", "v-price");
@@ -377,7 +418,7 @@ if (shop) {
 
   // ---------- Manual add / edit ----------
   $("btnAddManual").onclick = () => {
-    const name = $("m-name").value.trim();
+    const name = billName("m-name", $("m-name").value.trim());
     const qty = parseFloat($("m-qty").value) || 1;
     const price = parseFloat($("m-price").value) || 0;
     if(!name){ toast("Enter a product name"); return; }
@@ -466,7 +507,7 @@ if (shop) {
     $("micCaption").textContent = "";
   }
   $("btnAddVoice").onclick = () => {
-    const name = $("v-name").value.trim() || "Item";
+    const name = billName("v-name", $("v-name").value.trim() || "Item");
     const qty = parseFloat($("v-qty").value) || 1;
     const price = parseFloat($("v-price").value) || 0;
     items.push({ id: Date.now()+"_"+Math.random().toString(36).slice(2), name: titleCase(name), qty, price });

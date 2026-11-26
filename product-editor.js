@@ -13,7 +13,7 @@
 import {
   saveProductPrices, deleteProduct, renameProduct, productKey,
   packOrNull, packText, PACK_TYPES, PACK_UNITS, unitLabel, unitPriceText,
-  effectivePack, effectivePackType, effectivePackUnit, offerText
+  effectivePack, effectivePackType, effectivePackUnit, offerText, looseUnit, unitPrice
 } from "./data.js";
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -27,7 +27,7 @@ const fmtWhen = (ms) => {
 };
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // "Lowest" stays here only so older history lines (from before it was removed) still read properly.
-const LABEL = { pack: "Pack", mrp: "MRP", purchasePrice: "Purchase", sellPrice: "Selling", minPrice: "Lowest" };
+const LABEL = { pack: "Pack", mrp: "MRP", purchasePrice: "Purchase", sellPrice: "Selling", sellLoose: "Loose selling", minPrice: "Lowest" };
 const VIA = { bill: "Changed on the bill", prices: "Changed in Products" };
 
 export function mountProductEditor({ shopCode, toast, via = "", lookup = null, onOpenPurchase = null }){
@@ -67,7 +67,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         <div class="section-label" style="margin:14px 2px 8px;">Prices</div>
         <div class="pe-grid">
           <div class="field"><label>MRP ₹</label><input type="number" class="pe-mrp" inputmode="decimal" placeholder="—"></div>
-          <div class="field"><label>Selling price ₹</label><input type="number" class="pe-sell" inputmode="decimal" placeholder="—"></div>
+          <div class="field"><label class="pe-sell-label">Selling price ₹</label><input type="number" class="pe-sell" inputmode="decimal" placeholder="—"></div>
+          <div class="field pe-loose-field" style="grid-column:span 2;"><label class="pe-loose-label">Loose selling ₹ (per kg)</label><input type="number" class="pe-loose" inputmode="decimal" placeholder="price when sold loose"></div>
           <div class="field" style="grid-column:span 2;"><label class="pe-buy-label">Purchase price ₹</label><input type="number" class="pe-buy" inputmode="decimal" placeholder="—"></div>
         </div>
         <div class="pe-buy-note"></div>
@@ -112,7 +113,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     // individual price inside it (₹87.50/kg). pack = { perCase, type, unit } that price is for.
     const tile = (field, value, note, pack, wide) => {
       const per = pack && packOrNull(pack.perCase);
-      const each = per && value != null ? unitPriceText(value, pack.perCase, pack.unit) : "";
+      // the selling price per bag isn't divided — the loose price is typed separately
+      const each = per && value != null && !pack.noEach ? unitPriceText(value, pack.perCase, pack.unit) : "";
       return `
       <div class="pe-tile${field === "sellPrice" ? " main" : ""}"${wide ? ' style="grid-column:span 2;"' : ""}>
         <div class="pe-tlabel">${LABEL[field]}</div>
@@ -130,10 +132,26 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     const productPack = effectivePack(current)
       ? { perCase: effectivePack(current), type: effectivePackType(current), unit: effectivePackUnit(current) } : null;
     const buyPack = p && packOrNull(p.perCase) ? { perCase: p.perCase, type: p.packType, unit: p.packUnit } : null;
-    q(".pe-tiles").innerHTML =
-      tile("sellPrice", current.sellPrice, since("sellPrice"), productPack, true) +
-      tile("mrp", current.mrp, since("mrp"), productPack) +
-      tile("purchasePrice", p ? p.price : null, buyNote, buyPack);
+    if (productPack){
+      // pack product: selling price per bag, and its own (typed) loose price per kg / pc
+      const lu = looseUnit(productPack.unit);
+      const looseTile = `
+        <div class="pe-tile main">
+          <div class="pe-tlabel">Loose selling</div>
+          <div class="pe-tval">${current.sellLoose != null ? money(current.sellLoose) : "—"}</div>
+          <div class="pe-tper">per ${lu}</div>
+          <div class="pe-tnote">${current.sellLoose != null ? (since("sellLoose") || "&nbsp;") : "not set"}</div>
+        </div>`;
+      q(".pe-tiles").innerHTML =
+        tile("sellPrice", current.sellPrice, since("sellPrice"), { ...productPack, noEach: true }) + looseTile +
+        tile("mrp", current.mrp, since("mrp"), productPack) +
+        tile("purchasePrice", p ? p.price : null, buyNote, buyPack);
+    } else {
+      q(".pe-tiles").innerHTML =
+        tile("sellPrice", current.sellPrice, since("sellPrice"), null, true) +
+        tile("mrp", current.mrp, since("mrp"), null) +
+        tile("purchasePrice", p ? p.price : null, buyNote, buyPack);
+    }
     renderTimeline();
   }
 
@@ -182,6 +200,9 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     q(".pe-pcs-wrap").style.visibility = t === "loose" ? "hidden" : "visible";
     const n = packOrNull(num(".pe-pcs")), unit = q(".pe-unitsel").value;
     q(".pe-buy-label").textContent = t === "loose" ? "Purchase price ₹ (each)" : `Purchase price ₹ (${n ? packText(n, t, unit) : "whole " + t})`;
+    q(".pe-sell-label").textContent = t === "loose" ? "Selling price ₹" : `Selling price ₹ (per ${t})`;
+    q(".pe-loose-field").style.display = t === "loose" ? "none" : "block";
+    q(".pe-loose-label").textContent = `Loose selling ₹ (per ${looseUnit(unit)})`;
     updateBuyNote();
     check();
   }
@@ -199,6 +220,12 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     if (sell != null && mrp != null && sell > mrp) msgs.push(["warn", `Selling price ${money(sell)} is above MRP ${money(mrp)}`]);
     // a pack's purchase price can't be compared with a per-piece selling price
     if (packType() === "loose" && sell != null && buy != null && sell < buy) msgs.push(["warn", `Selling price ${money(sell)} is below what you paid (${money(buy)})`]);
+    if (packType() !== "loose"){
+      if (sell != null && buy != null && sell < buy) msgs.push(["warn", `Selling price ${money(sell)} per ${packType()} is below what you paid (${money(buy)})`]);
+      const loose = num(".pe-loose"), cost = unitPrice(buy, num(".pe-pcs"), q(".pe-unitsel").value);
+      if (loose != null && !(loose >= 0)){ msgs.push(["bad", "Prices can't be negative"]); block = true; }
+      if (loose != null && cost && loose < cost.value) msgs.push(["warn", `Loose price ${money(loose)}/${cost.per} is below what you paid (${money(cost.value)}/${cost.per})`]);
+    }
     q(".pe-msgs").innerHTML = msgs.map(([kind, text]) => `<div class="pe-msg ${kind}">${escapeHtml(text)}</div>`).join("");
     q(".pe-save").disabled = block;
     return !block;
@@ -225,6 +252,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     set(".pe-mrp", current && current.mrp);
     set(".pe-buy", current && current.purchase && current.purchase.price);
     set(".pe-sell", current && current.sellPrice);
+    set(".pe-loose", current && current.sellLoose);
     const pack = effectivePack(current);
     set(".pe-pcs", pack);
     q(".pe-packsel").value = pack ? effectivePackType(current) : "loose";
@@ -251,7 +279,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
       await saveProductPrices(shopCode, name, {
         mrp: num(".pe-mrp"), purchasePrice: buyNow === "" ? null : Number(buyNow), sellPrice: num(".pe-sell"),
         pack: isPack ? packOrNull(num(".pe-pcs")) : null, packType: isPack ? packType() : null,
-        packUnit: isPack ? q(".pe-unitsel").value : null
+        packUnit: isPack ? q(".pe-unitsel").value : null,
+        sellLoose: isPack ? num(".pe-loose") : null
       }, buyNow !== buyAtOpen, { before: current, via });
       toast(`Saved ${name}`);
       if (openedInEdit){ close(); }

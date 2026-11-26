@@ -253,6 +253,10 @@ export function unitPrice(price, perCase, packUnit) {
   return { value: Math.round((Number(price) / qty) * 100) / 100, per };
 }
 // "₹50/kg", "₹8.33/pc", or "" for a loose price.
+// What a pack's contents are sold loose by: kg (for kg or g), ltr (for ltr or ml) or pc.
+export function looseUnit(packUnit) {
+  return { pcs: "pc", kg: "kg", g: "kg", ltr: "ltr", ml: "ltr" }[packUnitOf(packUnit)];
+}
 export function unitPriceText(price, perCase, packUnit) {
   const u = unitPrice(price, perCase, packUnit);
   return u ? `₹${u.value.toFixed(2).replace(/\.00$/, "")}/${u.per}` : "";
@@ -350,6 +354,8 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
   const data = {
     key, name: String(name).trim(),
     mrp: priceOrNull(prices.mrp), sellPrice: priceOrNull(prices.sellPrice),
+    // pack products only: the price when sold loose, per kg / per pc / per ltr (typed, not worked out)
+    sellLoose: priceOrNull(prices.sellLoose),
     deletedAt: null,                 // setting prices again brings a deleted product back
     updatedAt: serverTimestamp()
   };
@@ -364,12 +370,12 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
     data.purchaseSetAt = Date.now();
   }
   const old = {
-    mrp: before ? before.mrp : null, sellPrice: before ? before.sellPrice : null,
+    mrp: before ? before.mrp : null, sellPrice: before ? before.sellPrice : null, sellLoose: before ? before.sellLoose : null,
     purchasePrice: before && before.purchase ? before.purchase.price : null,
     pack: effectivePack(before), packType: effectivePackType(before), packUnit: effectivePackUnit(before)
   };
   const diff = {};
-  ["mrp", "purchasePrice", "sellPrice"].forEach(f => {
+  ["mrp", "purchasePrice", "sellPrice", "sellLoose"].forEach(f => {
     if (!(f in data)) return;                          // purchase price not touched
     const from = old[f] ?? null, to = data[f] ?? null;
     if (from !== to) diff[f] = { from, to };
@@ -468,7 +474,7 @@ export function buildCatalog(purchases, productDocs) {
     }
     catalog.set(key, {
       key, name: d.name || (inv && inv.name) || key,
-      mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice),
+      mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice), sellLoose: priceOrNull(d.sellLoose),
       // product detail: how much is in the pack (null = loose), which kind of pack, and what it counts
       ...detail,
       purchase,

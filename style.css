@@ -277,6 +277,10 @@ input:focus, select:focus{ border-color: var(--accent); }
 .price-hint b{ color:var(--accent-dark); font-family:var(--mono); }
 .ph-chip{ border:1px solid #BFDDD1; background:var(--accent-soft); color:var(--accent-dark); border-radius:100px; padding:5px 10px; font-size:12px; font-weight:600; font-family:var(--sans); cursor:pointer; }
 .price-hint .warn{ flex-basis:100%; color:var(--danger); font-weight:700; }
+/* Bill page: sell a pack product loose (kg) or as a whole pack (bag) */
+.ph-modes{ flex-basis:100%; display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-weight:600; color:var(--ink-soft); }
+.ph-mode{ border:1.5px solid var(--line); background:var(--paper-panel); color:var(--ink); border-radius:10px; padding:7px 12px; font-family:var(--sans); font-size:13px; font-weight:700; cursor:pointer; }
+.ph-mode.on{ background:var(--accent); border-color:var(--accent); color:#fff; }
 .ph-edit{ border:none; background:var(--accent-soft); color:var(--accent-dark); width:28px; height:28px; border-radius:50%; font-size:14px; cursor:pointer; flex-shrink:0; }
 .ph-edit-link{ border:none; background:none; padding:0; color:var(--accent-dark); font-family:var(--sans); font-size:12.5px; font-weight:600; text-decoration:underline; cursor:pointer; }
 /* a value the app filled in for you (selling price, or read from a photo) — tinted until you change it */
