@@ -23,7 +23,7 @@
 <div id="app" class="with-nav">
   <a class="icon-btn" href="more.html" style="display:inline-block; margin:0 4px 6px;">‹ More</a>
   <div class="page-title">Products</div>
-  <div class="page-sub">MRP, purchase, selling and lowest price — tap a product to see or edit it</div>
+  <div class="page-sub">MRP, purchase and selling price — tap a product to see or edit it</div>
 
   <div class="btn-row" style="margin-bottom:10px;">
     <input type="text" id="priceSearch" placeholder="🔍 Search product" autocomplete="off" style="flex:1;">
@@ -45,7 +45,7 @@
 <script type="module">
 import {
   requireShopOrRedirect, subscribePurchases, subscribeProducts, subscribeSuppliers,
-  buildCatalog, productKey, unitLabel, samePack
+  buildCatalog, productKey, unitLabel, samePack, offerText
 } from "./data.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -91,11 +91,11 @@ if (shop) {
       const p = e.purchase;
       const bits = [];
       if (e.mrp) bits.push(`MRP ${money(e.mrp)}`);
-      if (p) bits.push(`Bought ${money(p.price)}${escapeHtml(unitLabel(p.perCase))}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
-      if (e.minPrice) bits.push(`Min ${money(e.minPrice)}`);
+      if (p) bits.push(`Bought ${money(p.price)}${escapeHtml(unitLabel(p.perCase, p.packType))}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
+      if (p && p.fromInvoice && offerText(p.offer)) bits.push(`🎁 ${escapeHtml(offerText(p.offer))}`);
       // purchase price went up/down compared with the invoice before — only for the same pack
       const prev = e.prevInvoice;
-      const was = p && p.fromInvoice && prev && samePack(prev.perCase, p.perCase) && r2(prev.price) !== r2(p.price)
+      const was = p && p.fromInvoice && prev && samePack(prev.perCase, p.perCase, prev.packType, p.packType) && r2(prev.price) !== r2(p.price)
         ? `<div class="was-tag ${p.price > prev.price ? "up" : "down"}">${p.price > prev.price ? "▲" : "▼"} bought ${money(prev.price)} before</div>` : "";
       return `<div class="history-item" data-key="${escapeHtml(e.key)}">
         <div class="hi-left" style="min-width:0;">

@@ -297,6 +297,7 @@ input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
 .pe-pack-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--ink-soft); }
 .pe-pcs-wrap{ display:inline-flex; align-items:center; gap:6px; }
 .pe-pcs-wrap input{ width:70px; text-align:center; padding:8px 6px; }
+.pe-pack-row select{ width:auto; padding:9px 10px; font-weight:600; }
 .pe-packline{ font-size:13px; color:var(--ink-soft); margin:-4px 2px 10px; }
 .pe-packline b{ color:var(--ink); }
 .pe-tiles{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }

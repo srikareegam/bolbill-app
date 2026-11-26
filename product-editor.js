@@ -1,16 +1,19 @@
-// A product's details and four prices — MRP, purchase, selling and lowest (non-negotiable) —
-// with their history. Shared by the Bill page (✎ next to the price hint) and the Purchase page's Prices tab.
+// A product's details and prices — MRP, purchase and selling — with their history.
+// Shared by the Bill page (✎ next to the price hint) and the Products page.
 //
 // mountProductEditor({ shopCode, toast, via, lookup, onOpenPurchase })
 //     -> { open(name, entry, { mode }), refresh() }
 //   via            — "bill" or "prices": written into the price history with each change
 //   lookup(key)    — returns the latest catalog entry, so the sheet shows saved changes straight away
 //   onOpenPurchase — tapping an invoice line in the history opens that purchase
-//   open(…, { mode: "view" })  shows the prices, "✎ Edit product" and the history (Prices tab)
+//   open(…, { mode: "view" })  shows the prices, "✎ Edit product" and the history (Products page)
 //   open(…, { mode: "edit" })  goes straight to editing (Bill page ✎, new products)
 //   refresh()      — call when the data changes, to redraw the sheet if it's open
 
-import { saveProductPrices, deleteProduct, renameProduct, productKey, packOrNull, unitLabel, effectivePack } from "./data.js";
+import {
+  saveProductPrices, deleteProduct, renameProduct, productKey,
+  packOrNull, packText, PACK_TYPES, unitLabel, effectivePack, effectivePackType, offerText
+} from "./data.js";
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 const money = (n) => "₹" + r2(n).toFixed(2).replace(/\.00$/, "");
@@ -21,7 +24,8 @@ const fmtWhen = (ms) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + ", " +
          d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 };
-const packText = (perCase) => packOrNull(perCase) ? `case of ${packOrNull(perCase)}` : "loose";
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+// "Lowest" stays here only so older history lines (from before it was removed) still read properly.
 const LABEL = { pack: "Pack", mrp: "MRP", purchasePrice: "Purchase", sellPrice: "Selling", minPrice: "Lowest" };
 const VIA = { bill: "Changed on the bill", prices: "Changed in Products" };
 
@@ -51,16 +55,18 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         <div class="field">
           <label>Bought as</label>
           <div class="pe-pack-row">
-            <div class="seg pe-seg"><button type="button" data-pack="loose">Loose</button><button type="button" data-pack="case">Case</button></div>
-            <span class="pe-pcs-wrap"><input type="number" class="pe-pcs" inputmode="numeric" placeholder="10"> pieces per case</span>
+            <select class="pe-packsel">
+              <option value="loose">Loose</option>
+              ${PACK_TYPES.map(t => `<option value="${t}">${cap(t)}</option>`).join("")}
+            </select>
+            <span class="pe-pcs-wrap"><input type="number" class="pe-pcs" inputmode="numeric" placeholder="10"> <span class="pe-pcs-label">in a case</span></span>
           </div>
         </div>
         <div class="section-label" style="margin:14px 2px 8px;">Prices</div>
         <div class="pe-grid">
           <div class="field"><label>MRP ₹</label><input type="number" class="pe-mrp" inputmode="decimal" placeholder="—"></div>
-          <div class="field"><label class="pe-buy-label">Purchase price ₹</label><input type="number" class="pe-buy" inputmode="decimal" placeholder="—"></div>
           <div class="field"><label>Selling price ₹</label><input type="number" class="pe-sell" inputmode="decimal" placeholder="—"></div>
-          <div class="field"><label>Lowest (non-negotiable) ₹</label><input type="number" class="pe-min" inputmode="decimal" placeholder="—"></div>
+          <div class="field" style="grid-column:span 2;"><label class="pe-buy-label">Purchase price ₹</label><input type="number" class="pe-buy" inputmode="decimal" placeholder="—"></div>
         </div>
         <div class="pe-buy-note"></div>
         <div class="pe-msgs"></div>
@@ -78,7 +84,6 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   let mode = "view";
   let openedInEdit = false;  // Cancel/Save then closes the sheet instead of going back to the view
   let buyAtOpen = "";        // purchase box value when editing started, to tell if it was typed by hand
-  let packMode = "loose";    // the Loose | Case toggle
 
   const isOpen = () => !root.classList.contains("hidden");
   function close(){ root.classList.add("hidden"); }
@@ -88,7 +93,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     q(".pe-edit").style.display = m === "edit" ? "block" : "none";
     q(".pe-sub").textContent = m === "view"
       ? "Tap “Edit product” to change it — every change is kept below"
-      : "Used on the bill: selling price fills in, lowest price warns you";
+      : "Used on the bill: the selling price fills in by itself";
   }
 
   // ---------- View: current prices + history ----------
@@ -99,24 +104,23 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   }
   function renderView(){
     q(".pe-title").textContent = current.name;
-    q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current))}</b>`;
+    q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current), effectivePackType(current))}</b>`;
     const p = current.purchase;
-    const tile = (field, value, note) => `
-      <div class="pe-tile${field === "sellPrice" ? " main" : ""}">
+    const tile = (field, value, note, wide) => `
+      <div class="pe-tile${field === "sellPrice" ? " main" : ""}"${wide ? ' style="grid-column:span 2;"' : ""}>
         <div class="pe-tlabel">${LABEL[field]}</div>
         <div class="pe-tval">${value != null ? money(value) : "—"}</div>
         <div class="pe-tnote">${value != null && note ? note : (value == null ? "not set" : "&nbsp;")}</div>
       </div>`;
     const since = (field) => { const at = lastChangedAt(field); return at ? "since " + fmtWhen(at) : ""; };
-    const caseBit = p && packOrNull(p.perCase) ? `case of ${packOrNull(p.perCase)} · ` : "";
-    const buyNote = !p ? "" : caseBit + (p.fromInvoice
+    const packBit = p && packOrNull(p.perCase) ? `${packText(p.perCase, p.packType)} · ` : "";
+    const buyNote = !p ? "" : packBit + (p.fromInvoice
       ? `invoice · ${escapeHtml(p.supplierName || "")} · ${fmtDate(p.date)}`
       : (since("purchasePrice") ? "by hand · " + since("purchasePrice").replace("since ", "") : "by hand"));
     q(".pe-tiles").innerHTML =
-      tile("sellPrice", current.sellPrice, since("sellPrice")) +
+      tile("sellPrice", current.sellPrice, since("sellPrice"), true) +
       tile("mrp", current.mrp, since("mrp")) +
-      tile("purchasePrice", p ? p.price : null, buyNote) +
-      tile("minPrice", current.minPrice, since("minPrice"));
+      tile("purchasePrice", p ? p.price : null, buyNote);
     renderTimeline();
   }
 
@@ -131,9 +135,10 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     box.innerHTML = events.map(e => {
       if (e.kind === "invoice"){
         const h = e.h;
+        const offer = offerText(h.offer);
         return `<div class="pe-hrow${onOpenPurchase ? " link" : ""}" data-pid="${escapeHtml(h.purchaseId)}">
           <div class="pe-hwhen">${fmtDate(h.date)}</div>
-          <div class="pe-hwhat">Purchase price <b>${money(h.price)}</b>${escapeHtml(unitLabel(h.perCase))}</div>
+          <div class="pe-hwhat">Purchase price <b>${money(h.price)}</b>${escapeHtml(unitLabel(h.perCase, h.packType))}${offer ? ` · 🎁 ${escapeHtml(offer)}` : ""}</div>
           <div class="pe-hsrc">From invoice · ${escapeHtml(h.supplierName || "supplier")}${onOpenPurchase ? " · tap to view" : ""}</div>
         </div>`;
       }
@@ -147,7 +152,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
       // fixed order — Firestore doesn't keep the order of the fields inside a change
       const diff = e.c.diff || {};
       const lines = Object.keys(LABEL).filter(f => diff[f]).map(f => f === "pack"
-        ? `Pack ${packText(diff.pack.from)} → <b>${packText(diff.pack.to)}</b>`
+        ? `Pack ${packText(diff.pack.from, diff.pack.fromType)} → <b>${packText(diff.pack.to, diff.pack.toType)}</b>`
         : `${LABEL[f]} ${diff[f].from != null ? money(diff[f].from) : "—"} → <b>${diff[f].to != null ? money(diff[f].to) : "removed"}</b>`);
       return `<div class="pe-hrow"><div class="pe-hwhen">${fmtWhen(e.at)}</div><div class="pe-hwhat">${lines.join("<br>")}</div>${src}</div>`;
     }).join("");
@@ -158,31 +163,28 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   q(".pe-edit-btn").onclick = () => startEdit();
 
   // ---------- Edit ----------
-  function setPack(m){
-    packMode = m;
-    root.querySelectorAll(".pe-seg button").forEach(b => b.classList.toggle("on", b.dataset.pack === m));
-    q(".pe-pcs-wrap").style.visibility = m === "case" ? "visible" : "hidden";
-    const pcs = packOrNull(num(".pe-pcs"));
-    q(".pe-buy-label").textContent = m === "case" ? `Purchase ₹ (${pcs ? "case of " + pcs : "whole case"})` : "Purchase price ₹ (each)";
+  const packType = () => q(".pe-packsel").value;           // "loose" or a pack type
+  function showPack(){
+    const t = packType();
+    q(".pe-pcs-wrap").style.visibility = t === "loose" ? "hidden" : "visible";
+    q(".pe-pcs-label").textContent = `in a ${t}`;
+    const n = packOrNull(num(".pe-pcs"));
+    q(".pe-buy-label").textContent = t === "loose" ? "Purchase price ₹ (each)" : `Purchase price ₹ (${n ? packText(n, t) : "whole " + t})`;
     check();
   }
-  root.querySelectorAll(".pe-seg button").forEach(b => b.onclick = () => setPack(b.dataset.pack));
-  q(".pe-pcs").addEventListener("input", () => setPack(packMode));
+  q(".pe-packsel").addEventListener("change", showPack);
+  q(".pe-pcs").addEventListener("input", showPack);
 
-  // Warnings while typing. Lowest above selling makes no sense, so that one blocks Save.
+  // Warnings while typing.
   function check(){
-    const mrp = num(".pe-mrp"), buy = num(".pe-buy"), sell = num(".pe-sell"), min = num(".pe-min");
+    const mrp = num(".pe-mrp"), buy = num(".pe-buy"), sell = num(".pe-sell");
     const msgs = [];
     let block = false;
-    if ([mrp, buy, sell, min].some(v => v != null && !(v >= 0))){ msgs.push(["bad", "Prices can't be negative"]); block = true; }
-    if (packMode === "case" && !packOrNull(num(".pe-pcs"))){ msgs.push(["bad", "Enter how many pieces are in a case (2 or more)"]); block = true; }
-    if (min != null && sell != null && min > sell){ msgs.push(["bad", `Lowest price ${money(min)} is more than the selling price ${money(sell)}`]); block = true; }
+    if ([mrp, buy, sell].some(v => v != null && !(v >= 0))){ msgs.push(["bad", "Prices can't be negative"]); block = true; }
+    if (packType() !== "loose" && !packOrNull(num(".pe-pcs"))){ msgs.push(["bad", `Enter how many are in a ${packType()} (2 or more)`]); block = true; }
     if (sell != null && mrp != null && sell > mrp) msgs.push(["warn", `Selling price ${money(sell)} is above MRP ${money(mrp)}`]);
-    // a case purchase price can't be compared with a per-piece selling price
-    if (packMode !== "case"){
-      if (sell != null && buy != null && sell < buy) msgs.push(["warn", `Selling price ${money(sell)} is below what you paid (${money(buy)})`]);
-      if (min != null && buy != null && min < buy) msgs.push(["warn", `Lowest price ${money(min)} is below what you paid (${money(buy)})`]);
-    }
+    // a pack's purchase price can't be compared with a per-piece selling price
+    if (packType() === "loose" && sell != null && buy != null && sell < buy) msgs.push(["warn", `Selling price ${money(sell)} is below what you paid (${money(buy)})`]);
     q(".pe-msgs").innerHTML = msgs.map(([kind, text]) => `<div class="pe-msg ${kind}">${escapeHtml(text)}</div>`).join("");
     q(".pe-save").disabled = block;
     return !block;
@@ -204,12 +206,12 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     set(".pe-mrp", current && current.mrp);
     set(".pe-buy", current && current.purchase && current.purchase.price);
     set(".pe-sell", current && current.sellPrice);
-    set(".pe-min", current && current.minPrice);
     const pack = effectivePack(current);
     set(".pe-pcs", pack);
+    q(".pe-packsel").value = pack ? effectivePackType(current) : "loose";
     buyAtOpen = q(".pe-buy").value.trim();
     q(".pe-buy-note").textContent = buyNote();
-    setPack(pack ? "case" : "loose");
+    showPack();
     setMode("edit");
     setTimeout(() => (current ? q(".pe-sell") : q(".pe-name")).focus(), 50);
   }
@@ -220,15 +222,15 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     const name = q(".pe-name").value.trim();
     if (!name){ toast("Enter the product name"); q(".pe-name").focus(); return; }
     const buyNow = q(".pe-buy").value.trim();
-    const pack = packMode === "case" ? packOrNull(num(".pe-pcs")) : null;
+    const isPack = packType() !== "loose";
     const btn = q(".pe-save");
     btn.disabled = true;
     try{
       // renamed: move the product (and its lines on past purchases) to the new name first
       if (current && name !== current.name) await renameProduct(shopCode, current.name, name, via);
       await saveProductPrices(shopCode, name, {
-        mrp: num(".pe-mrp"), purchasePrice: buyNow === "" ? null : Number(buyNow),
-        sellPrice: num(".pe-sell"), minPrice: num(".pe-min"), pack
+        mrp: num(".pe-mrp"), purchasePrice: buyNow === "" ? null : Number(buyNow), sellPrice: num(".pe-sell"),
+        pack: isPack ? packOrNull(num(".pe-pcs")) : null, packType: isPack ? packType() : null
       }, buyNow !== buyAtOpen, { before: current, via });
       toast(`Saved ${name}`);
       if (openedInEdit){ close(); }
@@ -253,7 +255,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
           ? `\n\nYour past purchase of it stays as it is. If a new invoice has it again, it comes back.`
           : `\n\nYour ${bought} past purchases of it stay as they are. If a new invoice has it again, it comes back.`)
       : "";
-    if (!confirm(`Delete “${current.name}”? Its prices are removed and it leaves the Prices list and bill suggestions.${note}`)) return;
+    if (!confirm(`Delete “${current.name}”? Its prices are removed and it leaves the Products list and bill suggestions.${note}`)) return;
     try{
       await deleteProduct(shopCode, current.name, bought > 0, via);
       toast(`${current.name} deleted`);

@@ -260,9 +260,9 @@ if (shop) {
   let allCustomers = [];
   subscribeCustomers(shop.shopCode, (list) => { allCustomers = list; });
 
-  // ---------- Product prices: MRP / bought / selling / lowest (set on the Purchase page or via ✎) ----------
+  // ---------- Product prices: MRP / bought / selling (set in More → Products or via ✎) ----------
   // A known product's selling price fills the price box (tinted, still changeable) and the other prices
-  // show underneath. Billing below the lowest (non-negotiable) price shows a red warning but is allowed.
+  // show underneath.
   let purchasesForPrices = [], productDocs = [];
   let catalog = new Map();
   const hintRefreshers = [];
@@ -273,22 +273,19 @@ if (shop) {
   subscribePurchases(shop.shopCode, (rows) => { purchasesForPrices = rows; rebuildCatalog(); });
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; rebuildCatalog(); });
 
-  // price: what's in the price box, for the below-lowest warning; null where there is no price box (calculator).
+  // price: what's in the price box; null where there is no price box (calculator), so "Sell ₹…" is shown instead.
   function priceHintHtml(name, price = null){
     const { exact, matches } = findPriceMatches(catalog, name, 3);
     if (exact){
       const bits = [];
       if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
-      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>${escapeHtml(unitLabel(exact.purchase.perCase))}`);
+      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>${escapeHtml(unitLabel(exact.purchase.perCase, exact.purchase.packType))}`);
       if (exact.sellPrice && price == null) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
-      if (exact.minPrice) bits.push(`Lowest <b>${money(exact.minPrice)}</b>`);
-      let html = `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
-      if (exact.minPrice && price > 0 && price < exact.minPrice) html += `<span class="warn">⚠ Below your lowest price ${money(exact.minPrice)}</span>`;
-      return html;
+      return `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
     }
     if (matches.length){
       return matches.map(m => {
-        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) + unitLabel(m.purchase.perCase) : "");
+        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) + unitLabel(m.purchase.perCase, m.purchase.packType) : "");
         return `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag ? " · " + tag : ""}</button>`;
       }).join("");
     }
@@ -323,7 +320,7 @@ if (shop) {
       $(hintId).innerHTML = priceHintHtml(nameEl.value, Number(priceEl.value) || 0);
     };
     nameEl.addEventListener("input", update);
-    priceEl.addEventListener("input", update);   // re-checks the below-lowest warning as the price is typed
+    priceEl.addEventListener("input", update);   // a typed price is no longer "auto-filled", so the tint goes
     $(hintId).addEventListener("click", (e) => {
       const chip = e.target.closest("[data-fill]");
       if (!chip) return;
