@@ -214,7 +214,23 @@ export function productKey(name) {
     .replace(/(\d+(?:\.\d+)?)\s?([a-z]+)\b/g, (m, num, unit) => UNIT_CANON[unit] ? num + UNIT_CANON[unit] : m);
 }
 
-// Builds Map(key -> { key, name, price, date, supplierName, supplierId, purchaseId, history[] }).
+// ---------- Case (bulk) prices ----------
+// A purchase line is either loose (price per piece) or a case: price = the whole case, perCase = pieces in it.
+// Only the case price is kept — no per-piece price is worked out.
+export function packOrNull(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 2 ? n : null;
+}
+// " / case of 10" for a case price, "" for a loose one.
+export function unitLabel(perCase) {
+  return packOrNull(perCase) ? ` / case of ${packOrNull(perCase)}` : "";
+}
+// Two prices can only be compared (▲/▼) when they're for the same pack.
+export function samePack(a, b) {
+  return packOrNull(a) === packOrNull(b);
+}
+
+// Builds Map(key -> { key, name, price, perCase, date, supplierName, supplierId, purchaseId, history[] }).
 // "Latest" = newest invoice date, then newest entry that day; within one invoice the last row wins.
 // Worked out from purchases every time, so editing/deleting a purchase can't leave a stale price.
 export function buildPriceList(purchases) {
@@ -226,7 +242,7 @@ export function buildPriceList(purchases) {
   ordered.forEach(p => (p.items || []).forEach(it => {
     const key = productKey(it.name);
     if (!key) return;
-    const entry = { price: it.price, date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id, savedAt: savedMs(p) };
+    const entry = { price: it.price, perCase: packOrNull(it.perCase), date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id, savedAt: savedMs(p) };
     const prev = list.get(key);
     const history = prev ? [entry, ...prev.history] : [entry];
     list.set(key, Object.assign({ key, name: it.name }, entry, { history }));
@@ -254,10 +270,19 @@ export function subscribeProducts(shopCode, cb) {
   return subscribeCol(shopCode, "products", cb);
 }
 const priceOrNull = (v) => (v === "" || v == null || !(Number(v) > 0)) ? null : Math.round(Number(v) * 100) / 100;
+// The pack a product is bought in: its own setting if saved, else the pack of its latest purchase price.
+export function effectivePack(entry) {
+  if (!entry) return null;
+  if (entry.packSet) return entry.pack;
+  return entry.purchase ? packOrNull(entry.purchase.perCase) : null;
+}
+
 // purchaseChanged: the purchase price was typed by hand — it then wins until the next invoice.
+// prices.pack: pieces per case (null = loose); also the pack a hand-typed purchase price is for.
 // before: the product as it was (from buildCatalog), so the change can be written to its price history.
 // via: where it was changed — "bill" or "prices".
-// Every save that changes a price adds one entry to `changes`: { at, via, diff: { sellPrice: { from, to }, … } }.
+// Every save that changes something adds one entry to `changes`:
+//   { at, via, diff: { sellPrice: { from, to }, pack: { from, to }, … } }.
 export async function saveProductPrices(shopCode, name, prices, purchaseChanged, { before = null, via = "" } = {}) {
   const key = productKey(name);
   if (!key) throw new Error("The product needs a name");
@@ -267,13 +292,16 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
     deletedAt: null,                 // setting prices again brings a deleted product back
     updatedAt: serverTimestamp()
   };
+  if ("pack" in prices) data.perCase = packOrNull(prices.pack);
   if (purchaseChanged) {
     data.purchasePrice = priceOrNull(prices.purchasePrice);
+    data.purchasePerCase = packOrNull(prices.pack);
     data.purchaseSetAt = Date.now();
   }
   const old = {
     mrp: before ? before.mrp : null, sellPrice: before ? before.sellPrice : null, minPrice: before ? before.minPrice : null,
-    purchasePrice: before && before.purchase ? before.purchase.price : null
+    purchasePrice: before && before.purchase ? before.purchase.price : null,
+    pack: effectivePack(before)
   };
   const diff = {};
   ["mrp", "purchasePrice", "sellPrice", "minPrice"].forEach(f => {
@@ -281,8 +309,44 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
     const from = old[f] ?? null, to = data[f] ?? null;
     if (from !== to) diff[f] = { from, to };
   });
+  if ("perCase" in data && (old.pack ?? null) !== (data.perCase ?? null)) diff.pack = { from: old.pack ?? null, to: data.perCase ?? null };
   if (Object.keys(diff).length) data.changes = arrayUnion({ at: Date.now(), via, diff });
   await setDoc(doc(db, "shops", shopCode, "products", key), data, { merge: true });
+}
+
+// Rename a product. Its prices and price history move to the new name, and the product's lines on
+// past purchases are renamed too, so invoice history follows. Sales bills keep the name they were
+// printed with. Refuses a name that already belongs to another product.
+export async function renameProduct(shopCode, oldName, newName, via = "") {
+  const oldKey = productKey(oldName), newKey = productKey(newName);
+  const name = String(newName || "").trim();
+  if (!newKey) throw new Error("The product needs a name");
+  const prodCol = collection(db, "shops", shopCode, "products");
+  const purchasesSnap = await getDocs(collection(db, "shops", shopCode, "purchases"));
+  if (newKey !== oldKey) {
+    const clashDoc = await getDoc(doc(prodCol, newKey));
+    const clashInvoice = purchasesSnap.docs.some(d => (d.data().items || []).some(it => productKey(it.name) === newKey));
+    if ((clashDoc.exists() && !clashDoc.data().deletedAt) || clashInvoice) throw new Error(`A product called “${name}” already exists`);
+  }
+  const oldSnap = await getDoc(doc(prodCol, oldKey));
+  const base = oldSnap.exists() ? oldSnap.data() : {};
+  const ops = [];
+  ops.push(b => b.set(doc(prodCol, newKey), Object.assign({}, base, {
+    key: newKey, name, updatedAt: serverTimestamp(),
+    changes: [...(Array.isArray(base.changes) ? base.changes : []), { at: Date.now(), via, renamedFrom: String(oldName).trim() }]
+  })));
+  if (newKey !== oldKey && oldSnap.exists()) ops.push(b => b.delete(oldSnap.ref));
+  purchasesSnap.docs.forEach(d => {
+    const items = d.data().items || [];
+    if (!items.some(it => productKey(it.name) === oldKey)) return;
+    // only the item names change — the purchase's own dates stay as they were
+    ops.push(b => b.update(d.ref, { items: items.map(it => productKey(it.name) === oldKey ? Object.assign({}, it, { name }) : it) }));
+  });
+  for (let i = 0; i < ops.length; i += 450) {          // Firestore allows 500 writes per batch
+    const batch = writeBatch(db);
+    ops.slice(i, i + 450).forEach(op => op(batch));
+    await batch.commit();
+  }
 }
 
 // Delete a product: its prices go, and it leaves the Prices list and bill suggestions.
@@ -300,8 +364,9 @@ export async function deleteProduct(shopCode, name, hasInvoices, via = "") {
   }, { merge: true });
 }
 
-// Every product with its four prices: Map(key -> { key, name, mrp, sellPrice, minPrice,
-//   purchase: { price, date, supplierName, supplierId, fromInvoice } | null, prevInvoicePrice, history[] }).
+// Every product with its four prices: Map(key -> { key, name, mrp, sellPrice, minPrice, pack, packSet,
+//   purchase: { price, perCase, date, supplierName, supplierId, fromInvoice } | null,
+//   prevInvoice, prevInvoicePrice, history[], changes[] }).
 // Purchase price = whichever was entered last: the newest invoice line, or a price typed by hand.
 export function buildCatalog(purchases, productDocs) {
   const invoices = buildPriceList(purchases);
@@ -314,14 +379,16 @@ export function buildCatalog(purchases, productDocs) {
     const manual = priceOrNull(d.purchasePrice);
     let purchase = null;
     if (inv && (manual == null || inv.savedAt > (d.purchaseSetAt || 0))) {
-      purchase = { price: inv.price, date: inv.date, supplierName: inv.supplierName, supplierId: inv.supplierId, fromInvoice: true };
+      purchase = { price: inv.price, perCase: inv.perCase, date: inv.date, supplierName: inv.supplierName, supplierId: inv.supplierId, fromInvoice: true };
     } else if (manual != null) {
-      purchase = { price: manual, date: d.purchaseSetAt ? todayKey(new Date(d.purchaseSetAt)) : "", fromInvoice: false };
+      purchase = { price: manual, perCase: packOrNull(d.purchasePerCase), date: d.purchaseSetAt ? todayKey(new Date(d.purchaseSetAt)) : "", fromInvoice: false };
     }
     catalog.set(key, {
       key, name: d.name || (inv && inv.name) || key,
       mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice), minPrice: priceOrNull(d.minPrice),
+      pack: packOrNull(d.perCase), packSet: "perCase" in d,   // product detail: pieces per case (null = loose)
       purchase,
+      prevInvoice: inv && inv.history[1] ? inv.history[1] : null,
       prevInvoicePrice: inv && inv.history[1] ? inv.history[1].price : null,
       history: inv ? inv.history : [],          // invoice lines, newest first
       changes: Array.isArray(d.changes) ? d.changes : []   // hand edits to the prices, oldest first

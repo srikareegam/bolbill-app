@@ -27,7 +27,25 @@
   <div id="list"></div>
 </div>
 
-<!-- Bill detail / edit -->
+<!-- Bill viewer: read only, with Reprint and "✎ Edit" -->
+<div class="modal-backdrop hidden" id="modalBillView">
+  <div class="modal">
+    <div class="modal-title" id="bv-title">Bill</div>
+    <div class="modal-sub" id="bv-sub"></div>
+    <div class="receipt-card" style="margin-bottom:12px;">
+      <div class="zigzag-top"></div>
+      <div id="bv-items"></div>
+    </div>
+    <div class="totals" id="bv-totals" style="padding-top:0;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="bv-close">Close</button>
+      <button class="btn btn-secondary" id="bv-reprint">🖨 Reprint</button>
+    </div>
+    <button class="btn btn-primary btn-full" id="bv-edit" style="margin-top:10px;">✎ Edit bill</button>
+  </div>
+</div>
+
+<!-- Bill edit -->
 <div class="modal-backdrop hidden" id="modalBill">
   <div class="modal">
     <div class="modal-title" id="bd-title">Bill</div>
@@ -137,9 +155,47 @@ if (shop) {
       </div>`;
     }).join("");
     box.querySelectorAll(".history-item").forEach(el => {
-      el.onclick = () => openBillDetail(bills.find(b => b.id === el.dataset.id));
+      el.onclick = () => openBillView(bills.find(b => b.id === el.dataset.id));   // read-only first
     });
   }
+
+  // ---------- Bill viewer (read only) ----------
+  let viewingBill = null;
+  function openBillView(b){
+    if (!b) return;
+    viewingBill = b;
+    const d = toDate(b);
+    $("bv-title").textContent = "Bill #" + String(b.billNo).padStart(4, "0");
+    $("bv-sub").textContent = [
+      d.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }),
+      [b.customerName, b.customerPhone].filter(Boolean).join(" · ")
+    ].filter(Boolean).join(" · ");
+    $("bv-items").innerHTML = (b.items || []).map((it, i) => `
+      <div class="item-row">
+        <div class="item-idx">${i + 1}</div>
+        <div class="item-info">
+          <div class="item-name">${escapeHtml(it.name)}</div>
+          <div class="item-sub">${it.qty} × ${rupee(it.price)}</div>
+        </div>
+        <div class="item-amt">${rupee(it.qty * it.price)}</div>
+      </div>`).join("") || `<div class="history-empty" style="padding:14px 0;">No items</div>`;
+    let t = `<div class="totals-line"><span>Subtotal</span><span class="amt">${rupee(b.subtotal)}</span></div>`;
+    if (b.tax) t += `<div class="totals-line"><span>Tax</span><span class="amt">${rupee(b.tax)}</span></div>`;
+    t += `<div class="totals-line grand"><span>Total</span><span class="amt">${rupee(b.total)}</span></div>`;
+    $("bv-totals").innerHTML = t;
+    $("modalBillView").classList.remove("hidden");
+  }
+  $("bv-close").onclick = () => { $("modalBillView").classList.add("hidden"); viewingBill = null; };
+  $("bv-reprint").onclick = () => {
+    const b = viewingBill;
+    if (b) reprintBill(b.billNo, toDate(b), b.customerName || "", b.customerPhone || "", b.items || [], b.subtotal, b.tax, b.total, "reprint");
+  };
+  $("bv-edit").onclick = () => {
+    const b = viewingBill;
+    $("modalBillView").classList.add("hidden");
+    viewingBill = null;
+    openBillDetail(b);
+  };
 
   document.querySelectorAll(".filter-chip").forEach(chip => {
     chip.onclick = () => {

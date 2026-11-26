@@ -268,6 +268,15 @@ input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
 .pe-msg{ font-size:12.5px; font-weight:600; border-radius:10px; padding:8px 10px; margin-bottom:6px; }
 .pe-msg.warn{ background:#FBF0D9; color:#7A5410; }
 .pe-msg.bad{ background:var(--danger-soft); color:var(--danger); }
+/* Loose | Case toggle (purchase rows and the product sheet) */
+.seg{ display:inline-flex; border:1.5px solid var(--line); border-radius:10px; overflow:hidden; flex-shrink:0; background:var(--paper-panel); }
+.seg button{ border:none; background:none; padding:7px 11px; font-family:var(--sans); font-size:12.5px; font-weight:700; color:var(--ink-soft); cursor:pointer; }
+.seg button.on{ background:var(--accent); color:#fff; }
+.pe-pack-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--ink-soft); }
+.pe-pcs-wrap{ display:inline-flex; align-items:center; gap:6px; }
+.pe-pcs-wrap input{ width:70px; text-align:center; padding:8px 6px; }
+.pe-packline{ font-size:13px; color:var(--ink-soft); margin:-4px 2px 10px; }
+.pe-packline b{ color:var(--ink); }
 .pe-tiles{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .pe-tile{ background:var(--paper-panel); border:1px solid var(--line); border-radius:14px; padding:10px 12px; min-width:0; }
 .pe-tile.main{ background:var(--accent-soft); border-color:#BFDDD1; }

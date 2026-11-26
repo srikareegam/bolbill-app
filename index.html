@@ -156,7 +156,7 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel } from "./data.js";
 import { mountCalculator } from "./calc.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -281,7 +281,7 @@ if (shop) {
     if (exact){
       const bits = [];
       if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
-      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>`);
+      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>${escapeHtml(unitLabel(exact.purchase.perCase))}`);
       if (exact.sellPrice && price == null) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
       if (exact.minPrice) bits.push(`Lowest <b>${money(exact.minPrice)}</b>`);
       let html = `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
@@ -290,7 +290,7 @@ if (shop) {
     }
     if (matches.length){
       return matches.map(m => {
-        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) : "");
+        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) + unitLabel(m.purchase.perCase) : "");
         return `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag ? " · " + tag : ""}</button>`;
       }).join("");
     }
