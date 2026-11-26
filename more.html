@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — More</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <div class="page-title">More</div>
+  <div class="page-sub" id="shopLine">Everything else in Bol Bill</div>
+
+  <div class="more-grid">
+    <a class="more-tile" href="products.html">
+      <span class="mt-glyph">🏷️</span>
+      <span class="mt-name">Products</span>
+      <span class="mt-sub">MRP, purchase, selling &amp; lowest prices</span>
+    </a>
+    <a class="more-tile" href="orders.html">
+      <span class="mt-glyph">🛒</span>
+      <span class="mt-name">Orders</span>
+      <span class="mt-sub">Read a customer's written list</span>
+    </a>
+    <a class="more-tile" href="stickers.html">
+      <span class="mt-glyph">🧷</span>
+      <span class="mt-name">Stickers</span>
+      <span class="mt-sub">Print sticker sheets</span>
+    </a>
+    <a class="more-tile" href="attendance.html">
+      <span class="mt-glyph">🕐</span>
+      <span class="mt-name">Staff</span>
+      <span class="mt-sub">Attendance in / out</span>
+    </a>
+    <a class="more-tile" href="settings.html">
+      <span class="mt-glyph">⚙️</span>
+      <span class="mt-name">Settings</span>
+      <span class="mt-sub">Shop name, address, GST, footer</span>
+    </a>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📊</span>Reports</a>
+  <a class="nav-item active" href="more.html"><span class="nav-glyph">☰</span>More</a>
+</nav>
+
+<script type="module">
+import { requireShopOrRedirect, subscribeSettings } from "./data.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  // which shop this phone is billing for
+  subscribeSettings(shop.shopCode, (s) => {
+    document.getElementById("shopLine").textContent = `${s.shopName || "Your shop"} · Shop code ${shop.shopCode}`;
+  });
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

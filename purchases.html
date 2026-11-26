@@ -112,7 +112,6 @@
     <div class="tabbtn active" data-tab="new">New</div>
     <div class="tabbtn" data-tab="history">History</div>
     <div class="tabbtn" data-tab="suppliers">Suppliers</div>
-    <div class="tabbtn" data-tab="prices">Prices</div>
   </div>
 
   <!-- ===== New / edit purchase ===== -->
@@ -218,26 +217,13 @@
     <div id="supList"></div>
   </div>
 
-  <!-- ===== Prices: MRP / purchase / selling / lowest per product ===== -->
-  <div class="pur-sec" id="sec-prices">
-    <div class="btn-row" style="margin-bottom:10px;">
-      <input type="text" id="priceSearch" placeholder="🔍 Search product" autocomplete="off" style="flex:1;">
-      <button class="btn btn-secondary" id="btnNewProduct" style="flex:0 0 auto; padding:0 14px;">+ Product</button>
-    </div>
-    <div class="money-row" style="margin:0 4px 10px;"><span id="priceCount">0 products</span><span>selling price</span></div>
-    <div id="priceList"></div>
-  </div>
 </div>
 
 <nav class="bottom-nav">
   <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
-  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
-  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
-  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
   <a class="nav-item active" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
-  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
-  <a class="nav-item" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
-  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📊</span>Reports</a>
+  <a class="nav-item" href="more.html"><span class="nav-glyph">☰</span>More</a>
 </nav>
 
 <!-- Full-screen invoice viewer -->
@@ -338,7 +324,6 @@ import {
   subscribeProducts, buildCatalog
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
-import { mountProductEditor } from "./product-editor.js";
 
 const shop = requireShopOrRedirect();
 if (shop) {
@@ -381,7 +366,6 @@ if (shop) {
   let priceList = new Map();     // latest invoice price per product (built from purchases)
   let productDocs = [];          // the four prices the shopkeeper set per product
   let catalog = new Map();       // both combined — what the Prices tab shows
-  let productEditor = null;      // the price sheet (product-editor.js), set up further down
   let ledgerSupplierId = null;   // supplier whose account sheet is open
   let histFilter = "today";
   const supplierById = (id) => suppliers.find(s => s.id === id);
@@ -390,11 +374,19 @@ if (shop) {
 
   subscribeSettings(shop.shopCode, (d) => { settings = d; });
   subscribeSuppliers(shop.shopCode, (rows) => { suppliers = rows; refreshAll(); });
+  let viewFromLink = new URLSearchParams(location.search).get("view");   // purchases.html?view=<id>
   subscribePurchases(shop.shopCode, (rows) => {
     // same-day purchases: newest entry first
     const ms = (p) => (p.createdAt && p.createdAt.toMillis) ? p.createdAt.toMillis() : Date.now();
     purchases = rows.sort((a,b) => (b.invoiceDate || "").localeCompare(a.invoiceDate || "") || ms(b) - ms(a));
     refreshAll();
+    if (viewFromLink){
+      const id = viewFromLink;
+      viewFromLink = null;                       // only once
+      history.replaceState(null, "", "purchases.html");
+      showTab("history");
+      openPurchaseById(id);
+    }
   });
   subscribeSupplierPayments(shop.shopCode, (rows) => { payments = rows; refreshAll(); });
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; refreshAll(); });
@@ -405,9 +397,7 @@ if (shop) {
     catalog = buildCatalog(purchases, productDocs);
     renderHistory();
     renderSuppliers();
-    renderPrices();
     refreshProductHints();
-    if (productEditor) productEditor.refresh();   // an open price sheet shows the latest prices
     if (ledgerSupplierId) renderLedger();
   }
 
@@ -1065,55 +1055,6 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       el.onclick = () => openPurchaseById(el.dataset.id);   // read-only first; edit from there
     });
   }
-
-  // =====================================================================
-  // Prices: latest purchase price of every product
-  // =====================================================================
-  // Short money for the price line: ₹48 / ₹48.50
-  const money = (n) => "₹" + r2(n).toFixed(2).replace(/\.00$/, "");
-  function renderPrices(){
-    const typed = $("priceSearch").value;
-    const words = productKey(typed).split(" ").filter(Boolean);
-    const all = [...catalog.values()].sort((a, b) => a.name.localeCompare(b.name));
-    const list = words.length ? all.filter(e => words.every(w => e.key.includes(w))) : all;
-    $("priceCount").textContent = `${list.length} product${list.length !== 1 ? "s" : ""}`;
-    const box = $("priceList");
-    if (!all.length){ box.innerHTML = `<div class="history-empty">No products yet — add them on a purchase, or tap “+ Product”</div>`; return; }
-    if (!list.length){ box.innerHTML = `<div class="history-empty">No product matches “${escapeHtml(typed)}”</div>`; return; }
-    box.innerHTML = list.map(e => {
-      const p = e.purchase;
-      const bits = [];
-      if (e.mrp) bits.push(`MRP ${money(e.mrp)}`);
-      if (p) bits.push(`Bought ${money(p.price)}${escapeHtml(unitLabel(p.perCase))}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
-      if (e.minPrice) bits.push(`Min ${money(e.minPrice)}`);
-      // purchase price went up/down compared with the invoice before — only for the same pack
-      const prev = e.prevInvoice;
-      const was = p && p.fromInvoice && prev && samePack(prev.perCase, p.perCase) && r2(prev.price) !== r2(p.price)
-        ? `<div class="was-tag ${p.price > prev.price ? "up" : "down"}">${p.price > prev.price ? "▲" : "▼"} bought ${money(prev.price)} before</div>` : "";
-      return `<div class="history-item" data-key="${escapeHtml(e.key)}">
-        <div class="hi-left" style="min-width:0;">
-          <b style="font-family:var(--sans);">${escapeHtml(e.name)}</b>
-          <div>${bits.join(" · ") || (e.sellPrice ? "Only selling price set" : "No prices yet")}</div>
-        </div>
-        <div style="flex-shrink:0; margin-left:10px;">
-          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div>` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
-          ${was}
-        </div>
-      </div>`;
-    }).join("");
-    box.querySelectorAll(".history-item").forEach(el => el.onclick = () => {
-      const e = catalog.get(el.dataset.key);
-      if (e) productEditor.open(e.name, e, { mode: "view" });   // prices, "✎ Edit prices" and the history
-    });
-  }
-  $("priceSearch").oninput = renderPrices;
-
-  productEditor = mountProductEditor({
-    shopCode: shop.shopCode, toast, via: "prices",
-    lookup: (key) => catalog.get(key),
-    onOpenPurchase: openPurchaseById
-  });
-  $("btnNewProduct").onclick = () => productEditor.open($("priceSearch").value.trim(), null, { mode: "edit" });
 
   // =====================================================================
   // Suppliers & account sheet

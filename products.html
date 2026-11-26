@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bol Bill — Products</title>
+<meta name="theme-color" content="#0F6B52">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .money-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-family:var(--mono); font-size:13.5px; color:var(--ink-soft); padding:4px 0; }
+  .ok-tag{ font-family:var(--mono); font-weight:600; color:var(--accent-dark); margin-top:2px; text-align:right; }
+  .was-tag{ font-family:var(--mono); font-size:11px; font-weight:700; margin-top:2px; text-align:right; }
+  .was-tag.up{ color:var(--danger); }
+  .was-tag.down{ color:var(--accent-dark); }
+</style>
+</head>
+<body>
+
+<div id="app" class="with-nav">
+  <a class="icon-btn" href="more.html" style="display:inline-block; margin:0 4px 6px;">‹ More</a>
+  <div class="page-title">Products</div>
+  <div class="page-sub">MRP, purchase, selling and lowest price — tap a product to see or edit it</div>
+
+  <div class="btn-row" style="margin-bottom:10px;">
+    <input type="text" id="priceSearch" placeholder="🔍 Search product" autocomplete="off" style="flex:1;">
+    <button class="btn btn-secondary" id="btnNewProduct" style="flex:0 0 auto; padding:0 14px;">+ Product</button>
+  </div>
+  <div class="money-row" style="margin:0 4px 10px;"><span id="priceCount">0 products</span><span>selling price</span></div>
+  <div id="priceList"></div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="nav-item" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
+  <a class="nav-item" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📊</span>Reports</a>
+  <a class="nav-item active" href="more.html"><span class="nav-glyph">☰</span>More</a>
+</nav>
+
+<div id="toast"></div>
+
+<script type="module">
+import {
+  requireShopOrRedirect, subscribePurchases, subscribeProducts, subscribeSuppliers,
+  buildCatalog, productKey, unitLabel, samePack
+} from "./data.js";
+import { mountProductEditor } from "./product-editor.js";
+
+const shop = requireShopOrRedirect();
+if (shop) {
+  const $ = (id) => document.getElementById(id);
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const rupee = (n) => "₹" + r2(n).toFixed(2);
+  const money = (n) => "₹" + r2(n).toFixed(2).replace(/\.00$/, "");   // short: ₹48 / ₹48.50
+  function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove("show"), 2400);
+  }
+  const fmtDate = (key) => key ? new Date(key + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "";
+
+  let purchases = [], productDocs = [], suppliers = [];
+  let catalog = new Map();
+  let productEditor = null;
+  // supplier names follow renames on the Purchase page
+  const supplierNameOf = (e) => (suppliers.find(s => s.id === e.supplierId) || {}).name || e.supplierName || "Supplier";
+
+  function refresh(){
+    catalog = buildCatalog(purchases, productDocs);
+    renderPrices();
+    if (productEditor) productEditor.refresh();   // an open product sheet shows the latest prices
+  }
+  subscribePurchases(shop.shopCode, (rows) => { purchases = rows; refresh(); });
+  subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; refresh(); });
+  subscribeSuppliers(shop.shopCode, (rows) => { suppliers = rows; refresh(); });
+
+  function renderPrices(){
+    const typed = $("priceSearch").value;
+    const words = productKey(typed).split(" ").filter(Boolean);
+    const all = [...catalog.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const list = words.length ? all.filter(e => words.every(w => e.key.includes(w))) : all;
+    $("priceCount").textContent = `${list.length} product${list.length !== 1 ? "s" : ""}`;
+    const box = $("priceList");
+    if (!all.length){ box.innerHTML = `<div class="history-empty">No products yet — add them on a purchase, or tap “+ Product”</div>`; return; }
+    if (!list.length){ box.innerHTML = `<div class="history-empty">No product matches “${escapeHtml(typed)}”</div>`; return; }
+    box.innerHTML = list.map(e => {
+      const p = e.purchase;
+      const bits = [];
+      if (e.mrp) bits.push(`MRP ${money(e.mrp)}`);
+      if (p) bits.push(`Bought ${money(p.price)}${escapeHtml(unitLabel(p.perCase))}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
+      if (e.minPrice) bits.push(`Min ${money(e.minPrice)}`);
+      // purchase price went up/down compared with the invoice before — only for the same pack
+      const prev = e.prevInvoice;
+      const was = p && p.fromInvoice && prev && samePack(prev.perCase, p.perCase) && r2(prev.price) !== r2(p.price)
+        ? `<div class="was-tag ${p.price > prev.price ? "up" : "down"}">${p.price > prev.price ? "▲" : "▼"} bought ${money(prev.price)} before</div>` : "";
+      return `<div class="history-item" data-key="${escapeHtml(e.key)}">
+        <div class="hi-left" style="min-width:0;">
+          <b style="font-family:var(--sans);">${escapeHtml(e.name)}</b>
+          <div>${bits.join(" · ") || (e.sellPrice ? "Only selling price set" : "No prices yet")}</div>
+        </div>
+        <div style="flex-shrink:0; margin-left:10px;">
+          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div>` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
+          ${was}
+        </div>
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".history-item").forEach(el => el.onclick = () => {
+      const e = catalog.get(el.dataset.key);
+      if (e) productEditor.open(e.name, e, { mode: "view" });   // prices, "✎ Edit product" and the history
+    });
+  }
+  $("priceSearch").oninput = renderPrices;
+
+  productEditor = mountProductEditor({
+    shopCode: shop.shopCode, toast, via: "prices",
+    lookup: (key) => catalog.get(key),
+    // invoice lines in a product's history open that purchase (read-only) on the Purchase page
+    onOpenPurchase: (id) => { location.href = "purchases.html?view=" + encodeURIComponent(id); }
+  });
+  $("btnNewProduct").onclick = () => productEditor.open($("priceSearch").value.trim(), null, { mode: "edit" });
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

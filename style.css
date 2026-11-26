@@ -142,6 +142,20 @@ input:focus, select:focus{ border-color: var(--accent); }
   box-shadow: 0 10px 30px rgba(34,31,26,0.16);
 }
 .actionbar-inner .btn{ flex:1; }
+/* Bill page bar: Type · Calc · 🎤 · Save · Print — icon over a short label */
+.actionbar-inner{ gap:6px; padding:7px 8px; }
+.bar-btn{ flex-direction:column; gap:1px; padding:7px 2px; font-size:11px; border-radius:12px; min-width:0; }
+.bar-btn span{ font-size:17px; line-height:1.1; }
+.btn.bar-btn:not(.btn-secondary):not(.btn-print){ background:var(--paper); color:var(--ink); border:1px solid var(--line); }
+[hidden]{ display:none !important; }
+
+/* ---------- Bill page: slim header + optional customer ---------- */
+.shopline{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:4px 4px 2px; }
+.shopline .shop-name{ font-size:18px; font-weight:800; letter-spacing:-0.01em; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shopline-meta{ font-family:var(--mono); font-size:12.5px; color:var(--ink-soft); white-space:nowrap; }
+.shopline-meta b{ color:var(--ink); }
+.add-customer{ display:block; margin:10px 4px 0; color:var(--accent-dark); }
+#customerRow{ margin-top:10px; }
 .mic-btn{
   width:58px; height:58px; border-radius:50%; flex-shrink:0; background: var(--accent); color:#fff; border:none;
   font-size:22px; box-shadow: 0 6px 18px rgba(15,107,82,0.45); display:flex; align-items:center; justify-content:center; position:relative;
@@ -162,10 +176,18 @@ input:focus, select:focus{ border-color: var(--accent); }
 }
 .nav-item{
   flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 0;
-  font-size:9.5px; font-weight:600; color: var(--ink-faint); border-radius:12px; min-width:0;
+  font-size:11.5px; font-weight:700; color: var(--ink-faint); border-radius:12px; min-width:0;
   white-space:nowrap; overflow:hidden;
 }
-.nav-item .nav-glyph{ font-size:16px; }
+.nav-item .nav-glyph{ font-size:20px; }
+
+/* ---------- More page ---------- */
+.more-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.more-tile{ background:var(--paper-panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 14px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:6px; }
+.more-tile:active{ background:var(--accent-soft); }
+.more-tile .mt-glyph{ font-size:26px; }
+.more-tile .mt-name{ font-size:15px; font-weight:800; }
+.more-tile .mt-sub{ font-size:12px; color:var(--ink-soft); line-height:1.4; }
 .nav-item.active{ color: var(--accent-dark); background: var(--accent-soft); }
 
 /* ---------- History ---------- */
@@ -294,7 +316,7 @@ input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
 
 /* ---------- Toast ---------- */
 #toast{
-  position:fixed; left:50%; bottom:130px; transform:translateX(-50%) translateY(20px);
+  position:fixed; left:50%; bottom:164px; transform:translateX(-50%) translateY(20px);
   background: var(--ink); color:#fff; padding:10px 18px; border-radius:30px; font-size:13px; font-weight:600;
   opacity:0; pointer-events:none; transition: all 0.25s ease; z-index:200; white-space:nowrap;
 }

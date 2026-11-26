@@ -17,22 +17,16 @@
 
 <div id="app" class="with-nav">
 
-  <div class="shopcard" id="shopCard">
-    <div class="row1">
-      <div>
-        <div class="shop-name" id="disp-shopName">Loading…</div>
-        <div class="shop-meta" id="disp-shopMeta"></div>
-      </div>
-      <a class="edit-shop-btn" href="settings.html">✎ Edit</a>
-    </div>
-    <div class="bill-strip">
-      <span>NEXT BILL #<b id="disp-billNo">----</b></span>
-      <span id="disp-date">—</span>
-    </div>
+  <!-- slim header: shop name, next bill number and date (shop details are edited in More → Settings) -->
+  <div class="shopline" id="shopCard">
+    <div class="shop-name" id="disp-shopName">Loading…</div>
+    <div class="shopline-meta">#<b id="disp-billNo">----</b> · <span id="disp-date">—</span></div>
+    <div id="disp-shopMeta" hidden></div>
   </div>
 
-  <div class="section-label">Customer (optional)</div>
-  <div class="customer-row">
+  <!-- customer is optional: hidden behind "+ Customer" until needed -->
+  <button class="icon-btn add-customer" id="btnShowCustomer">+ Customer</button>
+  <div class="customer-row" id="customerRow" hidden>
     <div class="autocomplete-wrap" style="flex:1;">
       <input type="text" id="customerName" placeholder="Customer name" autocomplete="off">
       <div class="autocomplete-list hidden" id="customerSuggestions"></div>
@@ -42,11 +36,7 @@
 
   <div class="section-label">
     <span>Items</span>
-    <span style="margin-left:auto; display:flex; gap:14px;">
-      <button class="icon-btn" id="btnManualAdd">+ Manual</button>
-      <button class="icon-btn" id="btnCalcOpen">🧮 Calc</button>
-      <button class="icon-btn" id="btnNew">↺ New</button>
-    </span>
+    <span style="margin-left:auto;"><button class="icon-btn" id="btnNew">↺ New</button></span>
   </div>
   <div class="receipt-card">
     <div class="zigzag-top"></div>
@@ -58,23 +48,22 @@
 </div>
 
 <div class="actionbar">
+  <!-- every way to add an item, plus Save / Print, in one bar -->
   <div class="actionbar-inner">
-    <button class="btn btn-secondary" id="btnSaveOnly">💾<br>Save</button>
+    <button class="btn bar-btn" id="btnManualAdd"><span>⌨</span>Type</button>
+    <button class="btn bar-btn" id="btnCalcOpen"><span>🧮</span>Calc</button>
     <button class="mic-btn" id="btnMic">🎤</button>
-    <button class="btn btn-print" id="btnPrintSave">🖨<br>Print &amp; Save</button>
+    <button class="btn btn-secondary bar-btn" id="btnSaveOnly"><span>💾</span>Save</button>
+    <button class="btn btn-print bar-btn" id="btnPrintSave"><span>🖨</span>Print</button>
   </div>
 </div>
 <div class="mic-caption" id="micCaption"></div>
 
 <nav class="bottom-nav">
   <a class="nav-item active" href="index.html"><span class="nav-glyph">🧾</span>Bill</a>
-  <a class="nav-item" href="history.html"><span class="nav-glyph">📜</span>History</a>
-  <a class="nav-item" href="summary.html"><span class="nav-glyph">📊</span>Summary</a>
-  <a class="nav-item" href="orders.html"><span class="nav-glyph">🛒</span>Orders</a>
   <a class="nav-item" href="purchases.html"><span class="nav-glyph">📦</span>Purchase</a>
-  <a class="nav-item" href="stickers.html"><span class="nav-glyph">🏷️</span>Stickers</a>
-  <a class="nav-item" href="attendance.html"><span class="nav-glyph">🕐</span>Staff</a>
-  <a class="nav-item" href="settings.html"><span class="nav-glyph">⚙️</span>Settings</a>
+  <a class="nav-item" href="history.html"><span class="nav-glyph">📊</span>Reports</a>
+  <a class="nav-item" href="more.html"><span class="nav-glyph">☰</span>More</a>
 </nav>
 
 <!-- Voice confirm modal -->
@@ -189,7 +178,15 @@ if (shop) {
     $("disp-billNo").textContent = String(settings.nextBillNo || 1).padStart(4,"0");
     renderTotals();
   });
-  $("disp-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+  $("disp-date").textContent = new Date().toLocaleDateString('en-IN', {day:'2-digit', month:'short'});
+
+  // "+ Customer" shows the name/phone boxes; they hide again once the bill is cleared and they're empty.
+  function syncCustomerRow(show){
+    const visible = !!(show || $("customerName").value.trim() || $("customerPhone").value.trim());
+    $("customerRow").hidden = !visible;
+    $("btnShowCustomer").hidden = visible;
+  }
+  $("btnShowCustomer").onclick = () => { syncCustomerRow(true); $("customerName").focus(); };
 
   // ---------- Items ----------
   function renderItems(){
@@ -246,6 +243,7 @@ if (shop) {
     if(items.length && !confirm("Start a new bill? Unsaved items will be cleared.")) return;
     items = []; customerName=""; customerPhone="";
     $("customerName").value=""; $("customerPhone").value="";
+    syncCustomerRow();
     renderItems();
     toast("New bill started");
   };
@@ -591,6 +589,7 @@ if (shop) {
       const itemsSnapshot = items.slice();
       items = []; customerName=""; customerPhone="";
       $("customerName").value=""; $("customerPhone").value="";
+      syncCustomerRow();
       renderItems();
       toast("Bill #" + String(billNo).padStart(4,"0") + " saved");
       askToSendWhatsApp(waPhoneSnapshot, billNo, totals, itemsSnapshot);
@@ -616,6 +615,7 @@ if (shop) {
       if (imp.customer){
         if (imp.customer.name){ customerName = imp.customer.name; $("customerName").value = customerName; }
         if (imp.customer.phone){ customerPhone = imp.customer.phone; $("customerPhone").value = customerPhone; }
+        syncCustomerRow();
       }
       renderItems();
       if (imp.items && imp.items.length) toast(`Loaded ${imp.items.length} items — tap each to set its price`);

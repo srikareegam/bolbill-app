@@ -23,7 +23,7 @@ const fmtWhen = (ms) => {
 };
 const packText = (perCase) => packOrNull(perCase) ? `case of ${packOrNull(perCase)}` : "loose";
 const LABEL = { pack: "Pack", mrp: "MRP", purchasePrice: "Purchase", sellPrice: "Selling", minPrice: "Lowest" };
-const VIA = { bill: "Changed on the bill", prices: "Changed in Prices" };
+const VIA = { bill: "Changed on the bill", prices: "Changed in Products" };
 
 export function mountProductEditor({ shopCode, toast, via = "", lookup = null, onOpenPurchase = null }){
   const root = document.createElement("div");
