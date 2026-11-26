@@ -73,6 +73,8 @@
   .offer-line .offer-remove{ color:var(--danger); font-size:13px; }
   .pu-prod .amt small.offer{ color:var(--accent-dark); font-weight:600; }
   .prod-line2 .ei-pcs{ width:58px; text-align:center; font-family:var(--mono); padding:8px 4px; font-size:14px; }
+  .prod-line2 .ei-unit{ width:auto; padding:8px 6px; font-size:13.5px; border-radius:10px; }
+  .prod-line2 .unit-price{ font-family:var(--mono); font-weight:700; color:var(--accent-dark); white-space:nowrap; }
   .prod-hint{ font-size:11.5px; color:var(--ink-soft); margin:4px 2px 0; font-family:var(--mono); }
   .prod-hint:empty{ display:none; }
   .prod-hint .up{ color:var(--danger); font-weight:700; }
@@ -328,6 +330,7 @@ import {
   computeSupplierBalances, productKey, buildPriceList, findPriceMatches,
   packOrNull, unitLabel, samePack, effectivePack, effectivePackType,
   PACK_TYPES, packTypeOf, packText, offerOrNull, offerText,
+  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit,
   subscribeProducts, buildCatalog
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
@@ -606,7 +609,7 @@ if (shop) {
     $("pu-products").innerHTML = items.length
       ? items.map(it => `<div class="pu-prod">
           <span>${escapeHtml(it.name)}</span>
-          <span class="amt">${rupee(it.price)}<small>${packOrNull(it.perCase) ? escapeHtml(packText(it.perCase, it.packType)) : "each"}</small>${offerOrNull(it.offer) ? `<small class="offer">🎁 ${escapeHtml(offerText(it.offer))}</small>` : ""}</span>
+          <span class="amt">${rupee(it.price)}<small>${packOrNull(it.perCase) ? escapeHtml(packText(it.perCase, it.packType, it.packUnit) + " · " + unitPriceText(it.price, it.perCase, it.packUnit)) : "each"}</small>${offerOrNull(it.offer) ? `<small class="offer">🎁 ${escapeHtml(offerText(it.offer))}</small>` : ""}</span>
         </div>`).join("")
       : `<div class="history-empty" style="padding:12px 0;">No products noted on this purchase</div>`;
     $("pu-note").textContent = p.note ? "Note: " + p.note : "";
@@ -649,14 +652,14 @@ if (shop) {
   const INVOICE_PROMPT = `You are reading a supplier's purchase invoice / bill given to an Indian kirana (grocery) shop. It may be printed or handwritten and may mix Telugu and English.
 Extract: the supplier (seller) name, phone and GSTIN, the invoice number, the invoice date, the final grand total payable (after tax and round-off), and every product line.
 For each product give its name, price, perCase, packType, offerBuy and offerFree:
-- If the line is bought by the case, bag, box or carton and the count inside is printed (e.g. "1x12", "CS/12", "10 pcs", "12 Nos", "25 kg bag"), price = the rate for ONE whole pack, perCase = how many are in it, packType = "case", "bag", "box" or "carton".
-- Otherwise price = the rate for ONE piece and perCase = 0, packType = "".
+- If the line is bought by the case, bag, box or carton and the count inside is printed (e.g. "1x12", "CS/12", "10 pcs", "12 Nos", "25 kg bag"), price = the rate for ONE whole pack, perCase = how much is in it, packType = "case", "bag", "box" or "carton", and packUnit = what perCase counts: "pcs", "kg", "g", "ltr" or "ml" (e.g. a 25 kg bag -> perCase 25, packUnit "kg").
+- Otherwise price = the rate for ONE piece and perCase = 0, packType = "", packUnit = "".
 - If the line shows free goods / a scheme (e.g. "Free 1", "Sch 10+1", "10+1"), offerBuy = the quantity bought and offerFree = the free quantity; otherwise both 0.
 Use the rate column, not the line amount. If only quantity and line amount are shown, price = amount ÷ quantity. Keep the pack size of each piece in the name as printed (e.g. "Real Juice 1L").
 IMPORTANT: Keep the supplier name and product names in EXACTLY the script they were written in — Telugu stays in Telugu script, do NOT translate or transliterate.
 invoiceDate must be YYYY-MM-DD, or "" if not shown. total is a plain number with no currency symbol or commas (0 if not shown).
 Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
-{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","price":0,"perCase":0,"packType":"","offerBuy":0,"offerFree":0}]}`;
+{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","price":0,"perCase":0,"packType":"","packUnit":"","offerBuy":0,"offerFree":0}]}`;
 
   // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
   // Returns one line per filled field for the "Found on the invoice" box; filled inputs get tinted.
@@ -698,6 +701,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       .map(it => ({
         name: String(it.name ?? "").trim(), price: r2(String(it.price ?? "").replace(/[^\d.]/g, "")),
         perCase: packOrNull(it.perCase), packType: packTypeOf(String(it.packType || "").toLowerCase()),
+        packUnit: packUnitOf(String(it.packUnit || "").toLowerCase()),
         offer: offerOrNull({ buy: it.offerBuy, free: it.offerFree })
       }))
       .filter(it => it.name);
@@ -705,7 +709,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     if (scanned.length && !productsTyped){
       products = scanned.map(it => newRow({
         name: it.name, price: it.price > 0 ? it.price : "", auto: true,
-        mode: it.perCase ? it.packType : "loose", perCase: it.perCase || "", modeChosen: !!it.perCase,
+        mode: it.perCase ? it.packType : "loose", perCase: it.perCase || "", packUnit: it.packUnit, modeChosen: !!it.perCase,
         offerBuy: it.offer ? it.offer.buy : "", offerFree: it.offer ? it.offer.free : "", showOffer: !!it.offer
       }));
       renderProducts();
@@ -728,11 +732,12 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   //   modeChosen = the user picked the pack on this row, so a name match won't change it
   //   auto       = filled from the photo, not yet touched
   const newRowId = () => Date.now() + "_" + Math.random().toString(36).slice(2);
-  const newRow = (fields = {}) => Object.assign({ id: newRowId(), name: "", price: "", mode: "loose", perCase: "", offerBuy: "", offerFree: "", showOffer: false, modeChosen: false, auto: false }, fields);
+  const newRow = (fields = {}) => Object.assign({ id: newRowId(), name: "", price: "", mode: "loose", perCase: "", packUnit: "pcs", offerBuy: "", offerFree: "", showOffer: false, modeChosen: false, auto: false }, fields);
   // When editing, compare against the other purchases so "last ₹…" isn't this purchase's own price.
   const priceListForForm = () => editingId ? buildPriceList(purchases.filter(p => p.id !== editingId)) : priceList;
   const rowPack = (it) => it.mode !== "loose" ? packOrNull(it.perCase) : null;
   const rowPackType = (it) => it.mode !== "loose" ? it.mode : null;
+  const rowPackUnit = (it) => it.mode !== "loose" ? packUnitOf(it.packUnit) : null;
   const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
   function renderProducts(){
@@ -757,7 +762,9 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
             ${PACK_TYPES.map(t => `<option value="${t}">${cap(t)}</option>`).join("")}
           </select>
           <input type="number" class="ei-price${tint(it)}" value="${escapeHtml(it.price ?? "")}" inputmode="decimal">
-          <span class="pcs-wrap">× <input type="number" class="ei-pcs${tint(it)}" value="${escapeHtml(it.perCase ?? "")}" inputmode="numeric" placeholder="qty"> <span class="pcs-label"></span></span>
+          <span class="pcs-wrap">× <input type="number" class="ei-pcs${tint(it)}" value="${escapeHtml(it.perCase ?? "")}" inputmode="numeric" placeholder="qty">
+            <select class="ei-unit">${PACK_UNITS.map(u => `<option value="${u}">${u}</option>`).join("")}</select>
+            <span class="unit-price"></span></span>
           <button type="button" class="icon-btn offer-add">🎁 Offer</button>
         </div>
         <div class="offer-line">
@@ -780,8 +787,9 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       };
       nameIn.onfocus = () => renderProductSuggestions(el, it);
       nameIn.addEventListener("blur", () => setTimeout(() => el.querySelector(".autocomplete-list").classList.add("hidden"), 150));
-      priceIn.oninput = () => { it.price = priceIn.value; touched(); renderProductHint(el, it); };
-      pcsIn.oninput = () => { it.perCase = pcsIn.value; touched(); renderProductHint(el, it); };
+      priceIn.oninput = () => { it.price = priceIn.value; touched(); showUnitPrice(el, it); renderProductHint(el, it); };
+      pcsIn.oninput = () => { it.perCase = pcsIn.value; touched(); showUnitPrice(el, it); renderProductHint(el, it); };
+      el.querySelector(".ei-unit").onchange = (e) => { it.packUnit = e.target.value; it.modeChosen = true; touched(); showUnitPrice(el, it); renderProductHint(el, it); };
       el.querySelector(".ei-pack").onchange = (e) => {
         it.mode = e.target.value; it.modeChosen = true; touched();
         showMode(el, it);
@@ -796,14 +804,20 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       renderProductHint(el, it);
     });
   }
-  // Loose: "₹ each". Pack: "₹ bag × [25] in a bag". The offer line shows once "🎁 Offer" is tapped (or one is saved).
+  // The individual price inside the pack, worked out as you type: "= ₹50/kg".
+  function showUnitPrice(el, it){
+    const t = it.mode !== "loose" ? unitPriceText(it.price, it.perCase, it.packUnit) : "";
+    el.querySelector(".unit-price").textContent = t ? "= " + t : "";
+  }
+  // Loose: "₹ each". Pack: "₹ bag × [25] [kg] = ₹50/kg". The offer line shows once "🎁 Offer" is tapped (or one is saved).
   function showMode(el, it){
     const pack = it.mode !== "loose";
     el.querySelector(".ei-pack").value = it.mode;
     el.querySelector(".ei-price").placeholder = pack ? `₹ ${it.mode}` : "₹ each";
     el.querySelector(".pcs-wrap").style.display = pack ? "inline-flex" : "none";
-    el.querySelector(".pcs-label").textContent = pack ? `in a ${it.mode}` : "";
     el.querySelector(".ei-pcs").value = it.perCase ?? "";
+    el.querySelector(".ei-unit").value = packUnitOf(it.packUnit);
+    showUnitPrice(el, it);
     el.querySelector(".offer-line").style.display = it.showOffer ? "flex" : "none";
     el.querySelector(".offer-add").style.display = it.showOffer ? "none" : "inline-block";
   }
@@ -816,6 +830,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     const pack = effectivePack(known);
     it.mode = pack ? effectivePackType(known) : "loose";
     it.perCase = pack || "";
+    it.packUnit = pack ? effectivePackUnit(known) : "pcs";
     showMode(el, it);
   }
   // "last ₹1250 / bag of 25 · Sri Balaji · 20 Nov  ▲ ₹50" — the change only shows for the same pack.
@@ -825,10 +840,11 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     if (!last){ box.innerHTML = ""; return; }
     const now = r2(it.price), was = r2(last.price);
     let change = "";
-    if (now > 0 && now !== was && samePack(last.perCase, rowPack(it), last.packType, rowPackType(it))){
+    if (now > 0 && now !== was && samePack(last.perCase, rowPack(it), last.packType, rowPackType(it), last.packUnit, rowPackUnit(it))){
       change = now > was ? ` <span class="up">▲ ${rupee(now - was)}</span>` : ` <span class="down">▼ ${rupee(was - now)}</span>`;
     }
-    box.innerHTML = `last ${rupee(was)}${escapeHtml(unitLabel(last.perCase, last.packType))} · ${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}${change}`;
+    const each = unitPriceText(last.price, last.perCase, last.packUnit);
+    box.innerHTML = `last ${rupee(was)}${escapeHtml(unitLabel(last.perCase, last.packType, last.packUnit))}${each ? ` (${each})` : ""} · ${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}${change}`;
   }
   // Suggest products bought before, so the same product keeps the same name.
   function renderProductSuggestions(el, it){
@@ -839,7 +855,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     box.innerHTML = matches.map(m => `
       <div class="autocomplete-item" data-key="${escapeHtml(m.key)}">
         <div class="ac-name">${escapeHtml(m.name)}</div>
-        <div class="ac-phone">last ${rupee(m.price)}${escapeHtml(unitLabel(m.perCase, m.packType))} · ${escapeHtml(supplierNameOf(m))}</div>
+        <div class="ac-phone">last ${rupee(m.price)}${escapeHtml(unitLabel(m.perCase, m.packType, m.packUnit))} · ${escapeHtml(supplierNameOf(m))}</div>
       </div>`).join("");
     box.classList.remove("hidden");
     box.querySelectorAll(".autocomplete-item").forEach(opt => {
@@ -903,7 +919,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     setPayMode(p.payMode || "cash");
     products = (p.items || []).map(it => newRow({
       name: it.name, price: it.price,
-      mode: packOrNull(it.perCase) ? packTypeOf(it.packType) : "loose", perCase: packOrNull(it.perCase) || "", modeChosen: true,
+      mode: packOrNull(it.perCase) ? packTypeOf(it.packType) : "loose", perCase: packOrNull(it.perCase) || "", packUnit: packUnitOf(it.packUnit), modeChosen: true,
       offerBuy: offerOrNull(it.offer) ? it.offer.buy : "", offerFree: offerOrNull(it.offer) ? it.offer.free : "", showOffer: !!offerOrNull(it.offer)
     }));
     renderProducts();
@@ -1004,7 +1020,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       if (offerTyped && !offer){ toast(`Enter the offer for ${typed} as Buy … get … free (whole numbers)`); return; }
       // "red label 500 gm" is saved as the existing "Red Label 500g", so one product keeps one name
       const existing = known.get(productKey(typed));
-      items.push({ name: existing ? existing.name : typed, price, perCase, packType: perCase ? it.mode : null, offer });
+      items.push({ name: existing ? existing.name : typed, price, perCase, packType: perCase ? it.mode : null, packUnit: perCase ? packUnitOf(it.packUnit) : null, offer });
     }
     // a "split" that is really all one mode is saved as that mode
     const used = Object.entries(pay).filter(([, v]) => v > 0).map(([k]) => k);

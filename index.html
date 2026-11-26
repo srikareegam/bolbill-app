@@ -145,7 +145,7 @@
 </div>
 
 <script type="module">
-import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel } from "./data.js";
+import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel, unitPriceText } from "./data.js";
 import { mountCalculator } from "./calc.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -279,13 +279,17 @@ if (shop) {
     if (exact){
       const bits = [];
       if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
-      if (exact.purchase) bits.push(`Bought <b>${money(exact.purchase.price)}</b>${escapeHtml(unitLabel(exact.purchase.perCase, exact.purchase.packType))}`);
+      if (exact.purchase){
+        const p = exact.purchase, each = unitPriceText(p.price, p.perCase, p.packUnit);
+        // pack price and the individual price inside it: "Bought ₹1250 / bag of 25 kg · ₹50/kg"
+        bits.push(`Bought <b>${money(p.price)}</b>${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))}${each ? ` · <b>${each}</b>` : ""}`);
+      }
       if (exact.sellPrice && price == null) bits.push(`Sell <b>${money(exact.sellPrice)}</b>`);
       return `<span>📦 ${bits.join(" · ") || "No prices set yet"}</span><button type="button" class="ph-edit" data-edit-name="${escapeHtml(exact.name)}" title="Edit this product's prices">✎</button>`;
     }
     if (matches.length){
       return matches.map(m => {
-        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + money(m.purchase.price) + unitLabel(m.purchase.perCase, m.purchase.packType) : "");
+        const tag = m.sellPrice ? money(m.sellPrice) : (m.purchase ? "bought " + (unitPriceText(m.purchase.price, m.purchase.perCase, m.purchase.packUnit) || money(m.purchase.price)) : "");
         return `<button type="button" class="ph-chip" data-fill="${escapeHtml(m.name)}">${escapeHtml(m.name)}${tag ? " · " + tag : ""}</button>`;
       }).join("");
     }

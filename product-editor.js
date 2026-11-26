@@ -12,7 +12,8 @@
 
 import {
   saveProductPrices, deleteProduct, renameProduct, productKey,
-  packOrNull, packText, PACK_TYPES, unitLabel, effectivePack, effectivePackType, offerText
+  packOrNull, packText, PACK_TYPES, PACK_UNITS, unitLabel, unitPriceText,
+  effectivePack, effectivePackType, effectivePackUnit, offerText
 } from "./data.js";
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -59,7 +60,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
               <option value="loose">Loose</option>
               ${PACK_TYPES.map(t => `<option value="${t}">${cap(t)}</option>`).join("")}
             </select>
-            <span class="pe-pcs-wrap"><input type="number" class="pe-pcs" inputmode="numeric" placeholder="10"> <span class="pe-pcs-label">in a case</span></span>
+            <span class="pe-pcs-wrap">× <input type="number" class="pe-pcs" inputmode="numeric" placeholder="25">
+              <select class="pe-unitsel">${PACK_UNITS.map(u => `<option value="${u}">${u}</option>`).join("")}</select></span>
           </div>
         </div>
         <div class="section-label" style="margin:14px 2px 8px;">Prices</div>
@@ -104,7 +106,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   }
   function renderView(){
     q(".pe-title").textContent = current.name;
-    q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current), effectivePackType(current))}</b>`;
+    q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current), effectivePackType(current), effectivePackUnit(current))}</b>`;
     const p = current.purchase;
     const tile = (field, value, note, wide) => `
       <div class="pe-tile${field === "sellPrice" ? " main" : ""}"${wide ? ' style="grid-column:span 2;"' : ""}>
@@ -113,7 +115,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         <div class="pe-tnote">${value != null && note ? note : (value == null ? "not set" : "&nbsp;")}</div>
       </div>`;
     const since = (field) => { const at = lastChangedAt(field); return at ? "since " + fmtWhen(at) : ""; };
-    const packBit = p && packOrNull(p.perCase) ? `${packText(p.perCase, p.packType)} · ` : "";
+    // "bag of 25 kg · ₹50/kg · " — the pack and the individual price inside it
+    const packBit = p && packOrNull(p.perCase) ? `${packText(p.perCase, p.packType, p.packUnit)} · ${unitPriceText(p.price, p.perCase, p.packUnit)} · ` : "";
     const buyNote = !p ? "" : packBit + (p.fromInvoice
       ? `invoice · ${escapeHtml(p.supplierName || "")} · ${fmtDate(p.date)}`
       : (since("purchasePrice") ? "by hand · " + since("purchasePrice").replace("since ", "") : "by hand"));
@@ -138,7 +141,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         const offer = offerText(h.offer);
         return `<div class="pe-hrow${onOpenPurchase ? " link" : ""}" data-pid="${escapeHtml(h.purchaseId)}">
           <div class="pe-hwhen">${fmtDate(h.date)}</div>
-          <div class="pe-hwhat">Purchase price <b>${money(h.price)}</b>${escapeHtml(unitLabel(h.perCase, h.packType))}${offer ? ` · 🎁 ${escapeHtml(offer)}` : ""}</div>
+          <div class="pe-hwhat">Purchase price <b>${money(h.price)}</b>${escapeHtml(unitLabel(h.perCase, h.packType, h.packUnit))}${packOrNull(h.perCase) ? ` · ${escapeHtml(unitPriceText(h.price, h.perCase, h.packUnit))}` : ""}${offer ? ` · 🎁 ${escapeHtml(offer)}` : ""}</div>
           <div class="pe-hsrc">From invoice · ${escapeHtml(h.supplierName || "supplier")}${onOpenPurchase ? " · tap to view" : ""}</div>
         </div>`;
       }
@@ -152,7 +155,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
       // fixed order — Firestore doesn't keep the order of the fields inside a change
       const diff = e.c.diff || {};
       const lines = Object.keys(LABEL).filter(f => diff[f]).map(f => f === "pack"
-        ? `Pack ${packText(diff.pack.from, diff.pack.fromType)} → <b>${packText(diff.pack.to, diff.pack.toType)}</b>`
+        ? `Pack ${packText(diff.pack.from, diff.pack.fromType, diff.pack.fromUnit)} → <b>${packText(diff.pack.to, diff.pack.toType, diff.pack.toUnit)}</b>`
         : `${LABEL[f]} ${diff[f].from != null ? money(diff[f].from) : "—"} → <b>${diff[f].to != null ? money(diff[f].to) : "removed"}</b>`);
       return `<div class="pe-hrow"><div class="pe-hwhen">${fmtWhen(e.at)}</div><div class="pe-hwhat">${lines.join("<br>")}</div>${src}</div>`;
     }).join("");
@@ -167,13 +170,14 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   function showPack(){
     const t = packType();
     q(".pe-pcs-wrap").style.visibility = t === "loose" ? "hidden" : "visible";
-    q(".pe-pcs-label").textContent = `in a ${t}`;
-    const n = packOrNull(num(".pe-pcs"));
-    q(".pe-buy-label").textContent = t === "loose" ? "Purchase price ₹ (each)" : `Purchase price ₹ (${n ? packText(n, t) : "whole " + t})`;
+    const n = packOrNull(num(".pe-pcs")), unit = q(".pe-unitsel").value;
+    q(".pe-buy-label").textContent = t === "loose" ? "Purchase price ₹ (each)" : `Purchase price ₹ (${n ? packText(n, t, unit) : "whole " + t})`;
+    updateBuyNote();
     check();
   }
   q(".pe-packsel").addEventListener("change", showPack);
   q(".pe-pcs").addEventListener("input", showPack);
+  q(".pe-unitsel").addEventListener("change", showPack);
 
   // Warnings while typing.
   function check(){
@@ -195,9 +199,14 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     if (!p) return "";
     return p.fromInvoice ? `From invoice · ${p.supplierName || "supplier"} · ${fmtDate(p.date)}` : "Set by hand";
   }
-  q(".pe-buy").addEventListener("input", () => {
-    q(".pe-buy-note").textContent = q(".pe-buy").value.trim() !== buyAtOpen ? "Set by hand — the next invoice will update it again" : buyNote();
-  });
+  // Under the purchase box: the individual price inside the pack (= ₹50/kg), and where the price came from.
+  function updateBuyNote(){
+    const t = packType();
+    const each = t !== "loose" ? unitPriceText(num(".pe-buy"), packOrNull(num(".pe-pcs")), q(".pe-unitsel").value) : "";
+    const source = q(".pe-buy").value.trim() !== buyAtOpen ? "Set by hand — the next invoice will update it again" : buyNote();
+    q(".pe-buy-note").textContent = [each ? "= " + each : "", source].filter(Boolean).join(" · ");
+  }
+  q(".pe-buy").addEventListener("input", updateBuyNote);
 
   function startEdit(prefillName = ""){
     q(".pe-title").textContent = current ? current.name : "New product";
@@ -209,6 +218,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     const pack = effectivePack(current);
     set(".pe-pcs", pack);
     q(".pe-packsel").value = pack ? effectivePackType(current) : "loose";
+    q(".pe-unitsel").value = pack ? effectivePackUnit(current) : "pcs";
     buyAtOpen = q(".pe-buy").value.trim();
     q(".pe-buy-note").textContent = buyNote();
     showPack();
@@ -230,7 +240,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
       if (current && name !== current.name) await renameProduct(shopCode, current.name, name, via);
       await saveProductPrices(shopCode, name, {
         mrp: num(".pe-mrp"), purchasePrice: buyNow === "" ? null : Number(buyNow), sellPrice: num(".pe-sell"),
-        pack: isPack ? packOrNull(num(".pe-pcs")) : null, packType: isPack ? packType() : null
+        pack: isPack ? packOrNull(num(".pe-pcs")) : null, packType: isPack ? packType() : null,
+        packUnit: isPack ? q(".pe-unitsel").value : null
       }, buyNow !== buyAtOpen, { before: current, via });
       toast(`Saved ${name}`);
       if (openedInEdit){ close(); }

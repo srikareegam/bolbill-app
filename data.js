@@ -216,9 +216,10 @@ export function productKey(name) {
 
 // ---------- Pack (bulk) prices ----------
 // A purchase line is either loose (price per piece) or a pack — case, bag, box or carton:
-// price = the whole pack, perCase = how many are in it, packType = which kind of pack.
-// Only the pack price is kept — no per-piece price is worked out.
+// price = the whole pack, perCase = how much is in it, packType = which kind of pack,
+// packUnit = what perCase counts (pcs, kg, g, ltr, ml). The individual price (₹50/kg) is worked out.
 export const PACK_TYPES = ["case", "bag", "box", "carton"];
+export const PACK_UNITS = ["pcs", "kg", "g", "ltr", "ml"];
 export function packOrNull(v) {
   const n = Number(v);
   return Number.isInteger(n) && n >= 2 ? n : null;
@@ -227,18 +228,40 @@ export function packOrNull(v) {
 export function packTypeOf(t) {
   return PACK_TYPES.includes(t) ? t : "case";
 }
-// "bag of 25", or "loose".
-export function packText(perCase, packType) {
-  return packOrNull(perCase) ? `${packTypeOf(packType)} of ${packOrNull(perCase)}` : "loose";
+// Older lines saved before units existed count pieces.
+export function packUnitOf(u) {
+  return PACK_UNITS.includes(u) ? u : "pcs";
 }
-// " / bag of 25" for a pack price, "" for a loose one.
-export function unitLabel(perCase, packType) {
-  return packOrNull(perCase) ? " / " + packText(perCase, packType) : "";
+// "bag of 25 kg", "carton of 48" (pieces aren't spelled out), or "loose".
+export function packText(perCase, packType, packUnit) {
+  if (!packOrNull(perCase)) return "loose";
+  const unit = packUnitOf(packUnit);
+  return `${packTypeOf(packType)} of ${packOrNull(perCase)}${unit === "pcs" ? "" : " " + unit}`;
+}
+// " / bag of 25 kg" for a pack price, "" for a loose one.
+export function unitLabel(perCase, packType, packUnit) {
+  return packOrNull(perCase) ? " / " + packText(perCase, packType, packUnit) : "";
+}
+// The individual price inside a pack: ₹1250 bag of 25 kg -> 50 per kg; ₹400 carton of 48 -> 8.33 per pc.
+// Grams and ml are given per kg / per ltr (a price per gram isn't useful).
+export function unitPrice(price, perCase, packUnit) {
+  const n = packOrNull(perCase);
+  if (!n || !(Number(price) > 0)) return null;
+  const unit = packUnitOf(packUnit);
+  const qty = unit === "g" || unit === "ml" ? n / 1000 : n;
+  const per = { pcs: "pc", kg: "kg", g: "kg", ltr: "ltr", ml: "ltr" }[unit];
+  return { value: Math.round((Number(price) / qty) * 100) / 100, per };
+}
+// "₹50/kg", "₹8.33/pc", or "" for a loose price.
+export function unitPriceText(price, perCase, packUnit) {
+  const u = unitPrice(price, perCase, packUnit);
+  return u ? `₹${u.value.toFixed(2).replace(/\.00$/, "")}/${u.per}` : "";
 }
 // Two prices can only be compared (▲/▼) when they're for the same pack.
-export function samePack(aPerCase, bPerCase, aType, bType) {
+export function samePack(aPerCase, bPerCase, aType, bType, aUnit, bUnit) {
   if (packOrNull(aPerCase) !== packOrNull(bPerCase)) return false;
-  return !packOrNull(aPerCase) || packTypeOf(aType) === packTypeOf(bType);
+  if (!packOrNull(aPerCase)) return true;
+  return packTypeOf(aType) === packTypeOf(bType) && packUnitOf(aUnit) === packUnitOf(bUnit);
 }
 // A supplier's free-goods offer on a purchase line, e.g. buy 10 get 1 free -> { buy: 10, free: 1 }.
 export function offerOrNull(o) {
@@ -250,7 +273,7 @@ export function offerText(o) {
   return v ? `buy ${v.buy} get ${v.free} free` : "";
 }
 
-// Builds Map(key -> { key, name, price, perCase, packType, offer, date, supplierName, supplierId, purchaseId, history[] }).
+// Builds Map(key -> { key, name, price, perCase, packType, packUnit, offer, date, supplierName, supplierId, purchaseId, history[] }).
 // "Latest" = newest invoice date, then newest entry that day; within one invoice the last row wins.
 // Worked out from purchases every time, so editing/deleting a purchase can't leave a stale price.
 export function buildPriceList(purchases) {
@@ -264,7 +287,8 @@ export function buildPriceList(purchases) {
     if (!key) return;
     const perCase = packOrNull(it.perCase);
     const entry = {
-      price: it.price, perCase, packType: perCase ? packTypeOf(it.packType) : null, offer: offerOrNull(it.offer),
+      price: it.price, perCase, packType: perCase ? packTypeOf(it.packType) : null, packUnit: perCase ? packUnitOf(it.packUnit) : null,
+      offer: offerOrNull(it.offer),
       date: p.invoiceDate, supplierName: p.supplierName, supplierId: p.supplierId, purchaseId: p.id, savedAt: savedMs(p)
     };
     const prev = list.get(key);
@@ -306,9 +330,15 @@ export function effectivePackType(entry) {
   if (entry.packSet) return packTypeOf(entry.packType);
   return packTypeOf(entry.purchase && entry.purchase.packType);
 }
+export function effectivePackUnit(entry) {
+  if (!entry || !effectivePack(entry)) return null;
+  if (entry.packSet) return packUnitOf(entry.packUnit);
+  return packUnitOf(entry.purchase && entry.purchase.packUnit);
+}
 
 // purchaseChanged: the purchase price was typed by hand — it then wins until the next invoice.
-// prices.pack / prices.packType: how many in the pack (null = loose) and which kind of pack;
+// prices.pack / prices.packType / prices.packUnit: how much is in the pack (null = loose), which kind of
+//   pack and what it counts (pcs, kg, …);
 //   also the pack a hand-typed purchase price is for.
 // before: the product as it was (from buildCatalog), so the change can be written to its price history.
 // via: where it was changed — "bill" or "prices".
@@ -324,17 +354,19 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
     updatedAt: serverTimestamp()
   };
   const newPack = packOrNull(prices.pack), newType = newPack ? packTypeOf(prices.packType) : null;
-  if ("pack" in prices) { data.perCase = newPack; data.packType = newType; }
+  const newUnit = newPack ? packUnitOf(prices.packUnit) : null;
+  if ("pack" in prices) { data.perCase = newPack; data.packType = newType; data.packUnit = newUnit; }
   if (purchaseChanged) {
     data.purchasePrice = priceOrNull(prices.purchasePrice);
     data.purchasePerCase = newPack;
     data.purchasePackType = newType;
+    data.purchasePackUnit = newUnit;
     data.purchaseSetAt = Date.now();
   }
   const old = {
     mrp: before ? before.mrp : null, sellPrice: before ? before.sellPrice : null,
     purchasePrice: before && before.purchase ? before.purchase.price : null,
-    pack: effectivePack(before), packType: effectivePackType(before)
+    pack: effectivePack(before), packType: effectivePackType(before), packUnit: effectivePackUnit(before)
   };
   const diff = {};
   ["mrp", "purchasePrice", "sellPrice"].forEach(f => {
@@ -342,8 +374,8 @@ export async function saveProductPrices(shopCode, name, prices, purchaseChanged,
     const from = old[f] ?? null, to = data[f] ?? null;
     if (from !== to) diff[f] = { from, to };
   });
-  if ("perCase" in data && packText(old.pack, old.packType) !== packText(newPack, newType)) {
-    diff.pack = { from: old.pack ?? null, fromType: old.packType ?? null, to: newPack, toType: newType };
+  if ("perCase" in data && packText(old.pack, old.packType, old.packUnit) !== packText(newPack, newType, newUnit)) {
+    diff.pack = { from: old.pack ?? null, fromType: old.packType ?? null, fromUnit: old.packUnit ?? null, to: newPack, toType: newType, toUnit: newUnit };
   }
   if (Object.keys(diff).length) data.changes = arrayUnion({ at: Date.now(), via, diff });
   await setDoc(doc(db, "shops", shopCode, "products", key), data, { merge: true });
@@ -399,8 +431,8 @@ export async function deleteProduct(shopCode, name, hasInvoices, via = "") {
   }, { merge: true });
 }
 
-// Every product with its prices: Map(key -> { key, name, mrp, sellPrice, pack, packType, packSet,
-//   purchase: { price, perCase, packType, offer, date, supplierName, supplierId, fromInvoice } | null,
+// Every product with its prices: Map(key -> { key, name, mrp, sellPrice, pack, packType, packUnit, packSet,
+//   purchase: { price, perCase, packType, packUnit, offer, date, supplierName, supplierId, fromInvoice } | null,
 //   prevInvoice, prevInvoicePrice, history[], changes[] }).
 // Purchase price = whichever was entered last: the newest invoice line, or a price typed by hand.
 export function buildCatalog(purchases, productDocs) {
@@ -414,16 +446,17 @@ export function buildCatalog(purchases, productDocs) {
     const manual = priceOrNull(d.purchasePrice);
     let purchase = null;
     if (inv && (manual == null || inv.savedAt > (d.purchaseSetAt || 0))) {
-      purchase = { price: inv.price, perCase: inv.perCase, packType: inv.packType, offer: inv.offer, date: inv.date, supplierName: inv.supplierName, supplierId: inv.supplierId, fromInvoice: true };
+      purchase = { price: inv.price, perCase: inv.perCase, packType: inv.packType, packUnit: inv.packUnit, offer: inv.offer, date: inv.date, supplierName: inv.supplierName, supplierId: inv.supplierId, fromInvoice: true };
     } else if (manual != null) {
       const per = packOrNull(d.purchasePerCase);
-      purchase = { price: manual, perCase: per, packType: per ? packTypeOf(d.purchasePackType) : null, date: d.purchaseSetAt ? todayKey(new Date(d.purchaseSetAt)) : "", fromInvoice: false };
+      purchase = { price: manual, perCase: per, packType: per ? packTypeOf(d.purchasePackType) : null, packUnit: per ? packUnitOf(d.purchasePackUnit) : null, date: d.purchaseSetAt ? todayKey(new Date(d.purchaseSetAt)) : "", fromInvoice: false };
     }
     catalog.set(key, {
       key, name: d.name || (inv && inv.name) || key,
       mrp: priceOrNull(d.mrp), sellPrice: priceOrNull(d.sellPrice),
       // product detail: how many in the pack (null = loose) and which kind of pack
-      pack: packOrNull(d.perCase), packType: packOrNull(d.perCase) ? packTypeOf(d.packType) : null, packSet: "perCase" in d,
+      pack: packOrNull(d.perCase), packType: packOrNull(d.perCase) ? packTypeOf(d.packType) : null,
+      packUnit: packOrNull(d.perCase) ? packUnitOf(d.packUnit) : null, packSet: "perCase" in d,
       purchase,
       prevInvoice: inv && inv.history[1] ? inv.history[1] : null,
       prevInvoicePrice: inv && inv.history[1] ? inv.history[1].price : null,
