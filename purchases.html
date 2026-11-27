@@ -74,17 +74,30 @@
   .pu-prod .amt{ font-family:var(--mono); font-weight:600; white-space:nowrap; text-align:right; }
   .pu-prod .amt small{ display:block; font-weight:500; font-size:11px; color:var(--ink-soft); }
   #pu-dueLine.has-due{ color:var(--danger); }
-  .prod-line2{ display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
-  .prod-line2 .ei-price{ width:104px; text-align:right; font-family:var(--mono); padding:8px 9px; font-size:14px; }
-  .prod-line2 .pcs-wrap{ align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); }
-  .prod-line2 .ei-pack{ width:auto; padding:8px 8px; font-size:13.5px; font-weight:600; border-radius:10px; }
+  .prod-line2{ display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
+  .prod-line2 .ei-price{ width:84px; text-align:right; font-family:var(--mono); padding:8px 8px; font-size:14px; }
+  .prod-line2 .ei-pack{ width:auto; padding:8px 4px; font-size:13.5px; font-weight:600; border-radius:10px; }
   .prod-line2 .offer-add{ font-size:12.5px; color:var(--accent-dark); padding:0 2px; }
   .offer-line{ display:none; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px; font-size:12.5px; color:var(--ink-soft); }
   .offer-line input{ width:58px; text-align:center; font-family:var(--mono); padding:7px 4px; font-size:14px; }
   .offer-line .offer-remove{ color:var(--danger); font-size:13px; }
   .pu-prod .amt small.offer{ color:var(--accent-dark); font-weight:600; }
   .prod-line2 .ei-pcs{ width:58px; text-align:center; font-family:var(--mono); padding:8px 4px; font-size:14px; }
-  .prod-line2 .ei-unit{ width:auto; padding:8px 6px; font-size:13.5px; border-radius:10px; }
+  .prod-line2 .ei-unit, .pack-line .ei-unit{ width:auto; padding:8px 6px; font-size:13.5px; border-radius:10px; }
+  .qty-wrap{ display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; color:var(--ink-soft); }
+  .qty-wrap input{ width:48px; text-align:center; font-family:var(--mono); padding:8px 2px; font-size:14px; }
+  .prod-line2 .x{ color:var(--ink-soft); font-weight:700; }
+  .prod-line2 .price-for{ font-size:12px; font-weight:600; color:var(--ink-soft); }
+  .pack-line{ display:none; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px; font-size:12.5px; color:var(--ink-soft); }
+  .pack-line .ei-pcs{ width:58px; text-align:center; font-family:var(--mono); padding:8px 4px; font-size:14px; }
+  .pack-line .unit-price{ font-family:var(--mono); font-weight:700; color:var(--accent-dark); }
+  .line-foot{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:6px; }
+  .line-total{ font-family:var(--mono); font-size:12.5px; font-weight:700; color:var(--ink); }
+  .lines-sum{ font-size:12.5px; font-weight:600; margin:8px 4px 0; color:var(--ink-soft); }
+  .lines-sum:empty{ display:none; }
+  .lines-sum.ok{ color:var(--accent-dark); }
+  .lines-sum.off{ color:#8A5A00; }
+  .pu-prod .amt small.line-amt{ color:var(--ink); font-weight:700; }
   .prod-line2 .unit-price{ font-family:var(--mono); font-weight:700; color:var(--accent-dark); white-space:nowrap; }
   .prod-hint{ font-size:11.5px; color:var(--ink-soft); margin:4px 2px 0; font-family:var(--mono); }
   .prod-hint:empty{ display:none; }
@@ -190,6 +203,7 @@
       <span style="margin-left:auto;"><button class="icon-btn" id="btnAddProduct">+ Add product</button></span>
     </div>
     <div class="card" id="productsCard" style="padding:6px 12px;"></div>
+    <div class="lines-sum" id="linesSum"></div>
 
     <div class="section-label">Paid by</div>
     <div class="filter-row" id="modeChips">
@@ -372,6 +386,7 @@ if (shop) {
   const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
   const rupee = (n) => "₹" + r2(n).toFixed(2);
   const rupeeShort = (n) => "₹" + r2(n).toLocaleString("en-IN");
+  const inr = (n) => "₹" + r2(n).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });   // ₹24,400
   function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
   function toast(msg){
     const t = $("toast");
@@ -640,7 +655,7 @@ if (shop) {
     $("pu-products").innerHTML = items.length
       ? items.map(it => `<div class="pu-prod">
           <span>${escapeHtml(it.name)}</span>
-          <span class="amt">${rupee(it.price)}<small>${packOrNull(it.perCase) ? escapeHtml(packText(it.perCase, it.packType, it.packUnit) + " · " + unitPriceText(it.price, it.perCase, it.packUnit)) : "each"}</small>${offerOrNull(it.offer) ? `<small class="offer">🎁 ${escapeHtml(offerText(it.offer))}</small>` : ""}</span>
+          <span class="amt">${Number(it.qty) > 0 ? `${it.qty} × ` : ""}${rupee(it.price)}<small>${packOrNull(it.perCase) ? escapeHtml("per " + packText(it.perCase, it.packType, it.packUnit) + " · " + unitPriceText(it.price, it.perCase, it.packUnit)) : "each"}</small>${Number(it.qty) > 0 ? `<small class="line-amt">= ${rupee(Number(it.qty) * it.price)}</small>` : ""}${offerOrNull(it.offer) ? `<small class="offer">🎁 ${escapeHtml(offerText(it.offer))}</small>` : ""}</span>
         </div>`).join("")
       : `<div class="history-empty" style="padding:12px 0;">No products noted on this purchase</div>`;
     $("pu-note").textContent = p.note ? "Note: " + p.note : "";
@@ -682,7 +697,8 @@ if (shop) {
   // ---------- Auto-fill from the invoice photo (Gemini) ----------
   const INVOICE_PROMPT = `You are reading a supplier's purchase invoice / bill given to an Indian kirana (grocery) shop. It may be printed or handwritten and may mix Telugu and English.
 Extract: the supplier (seller) name, phone and GSTIN, the invoice number, the invoice date, the final grand total payable (after tax and round-off), and every product line.
-For each product give its name, price, perCase, packType, offerBuy and offerFree:
+For each product give its name, qty, price, perCase, packType, packUnit, offerBuy and offerFree. qty = how many were bought on that line (e.g. 10 tins, 3 cases).
+Important: a single tin, bottle, packet or bag sold as one item is ONE piece — e.g. "Gold drop 15 L tin, qty 10, rate 2440" is qty 10, price 2440, perCase 0. Only use a pack when one pack contains several pieces sold separately.
 - If the line is bought by the case, bag, box or carton and the count inside is printed (e.g. "1x12", "CS/12", "10 pcs", "12 Nos", "25 kg bag"), price = the rate for ONE whole pack, perCase = how much is in it, packType = "case", "bag", "box" or "carton", and packUnit = what perCase counts: "pcs", "kg", "g", "ltr" or "ml" (e.g. a 25 kg bag -> perCase 25, packUnit "kg").
 - Otherwise price = the rate for ONE piece and perCase = 0, packType = "", packUnit = "".
 - If the line shows free goods / a scheme (e.g. "Free 1", "Sch 10+1", "10+1"), offerBuy = the quantity bought and offerFree = the free quantity; otherwise both 0.
@@ -690,7 +706,7 @@ Use the rate column, not the line amount. If only quantity and line amount are s
 IMPORTANT: Keep the supplier name and product names in EXACTLY the script they were written in — Telugu stays in Telugu script, do NOT translate or transliterate.
 invoiceDate must be YYYY-MM-DD, or "" if not shown. total is a plain number with no currency symbol or commas (0 if not shown).
 Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
-{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","price":0,"perCase":0,"packType":"","packUnit":"","offerBuy":0,"offerFree":0}]}`;
+{"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","qty":1,"price":0,"perCase":0,"packType":"","packUnit":"","offerBuy":0,"offerFree":0}]}`;
 
   // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
   // Returns one line per filled field for the "Found on the invoice" box; filled inputs get tinted.
@@ -731,6 +747,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     const scanned = (Array.isArray(parsed.items) ? parsed.items : [])
       .map(it => ({
         name: String(it.name ?? "").trim(), price: r2(String(it.price ?? "").replace(/[^\d.]/g, "")),
+        qty: Number(it.qty) > 0 ? r2(it.qty) : "",
         perCase: packOrNull(it.perCase), packType: packTypeOf(String(it.packType || "").toLowerCase()),
         packUnit: packUnitOf(String(it.packUnit || "").toLowerCase()),
         offer: offerOrNull({ buy: it.offerBuy, free: it.offerFree })
@@ -740,7 +757,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     if (scanned.length && !productsTyped){
       products = scanned.map(it => newRow({
         name: it.name, price: it.price > 0 ? it.price : "", auto: true,
-        mode: it.perCase ? it.packType : "loose", perCase: it.perCase || "", packUnit: it.packUnit, modeChosen: !!it.perCase,
+        qty: it.qty, mode: it.perCase ? it.packType : "loose", perCase: it.perCase || "", packUnit: it.packUnit, modeChosen: !!it.perCase,
         offerBuy: it.offer ? it.offer.buy : "", offerFree: it.offer ? it.offer.free : "", showOffer: !!it.offer
       }));
       renderProducts();
@@ -763,7 +780,10 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   //   modeChosen = the user picked the pack on this row, so a name match won't change it
   //   auto       = filled from the photo, not yet touched
   const newRowId = () => Date.now() + "_" + Math.random().toString(36).slice(2);
-  const newRow = (fields = {}) => Object.assign({ id: newRowId(), name: "", price: "", mode: "loose", perCase: "", packUnit: "pcs", offerBuy: "", offerFree: "", showOffer: false, modeChosen: false, auto: false }, fields);
+  const newRow = (fields = {}) => Object.assign({ id: newRowId(), name: "", qty: "", price: "", mode: "loose", perCase: "", packUnit: "pcs", offerBuy: "", offerFree: "", showOffer: false, modeChosen: false, auto: false }, fields);
+  // quantity bought on a line (blank counts as 1) and the line's amount
+  const rowQty = (it) => Number(it.qty) > 0 ? Number(it.qty) : 1;
+  const rowAmount = (it) => r2(rowQty(it) * (Number(it.price) || 0));
   // When editing, compare against the other purchases so "last ₹…" isn't this purchase's own price.
   // All known products: ones from past invoices and ones added in More → Products.
   // When editing, this purchase is left out so "last ₹…" isn't its own price.
@@ -775,6 +795,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
 
   function renderProducts(){
     const card = $("productsCard");
+    renderLinesSum();
     if (products.length === 0){
       card.innerHTML = `<div class="history-empty" style="padding:12px 0;">Optional — what you bought, loose or by the case/bag/box. Reading the photo fills these in.</div>`;
       return;
@@ -790,14 +811,23 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
           <button class="ei-del" title="Remove">✕</button>
         </div>
         <div class="prod-line2">
-          <select class="ei-pack">
+          <select class="ei-pack" title="Loose = one item (a tin, a packet). Case/Bag/Box/Carton = one pack with several pieces inside.">
             <option value="loose">Loose</option>
             ${PACK_TYPES.map(t => `<option value="${t}">${cap(t)}</option>`).join("")}
           </select>
+          <label class="qty-wrap">Qty <input type="number" class="ei-qty${tint(it)}" value="${escapeHtml(it.qty ?? "")}" inputmode="decimal" placeholder="1"></label>
+          <span class="x">×</span>
           <input type="number" class="ei-price${tint(it)}" value="${escapeHtml(it.price ?? "")}" inputmode="decimal">
-          <span class="pcs-wrap">× <input type="number" class="ei-pcs${tint(it)}" value="${escapeHtml(it.perCase ?? "")}" inputmode="numeric" placeholder="qty">
-            <select class="ei-unit">${PACK_UNITS.map(u => `<option value="${u}">${u}</option>`).join("")}</select>
-            <span class="unit-price"></span></span>
+          <span class="price-for"></span>
+        </div>
+        <div class="pack-line">
+          <span class="pack-has">1 case has</span>
+          <input type="number" class="ei-pcs${tint(it)}" value="${escapeHtml(it.perCase ?? "")}" inputmode="numeric" placeholder="9">
+          <select class="ei-unit">${PACK_UNITS.map(u => `<option value="${u}">${u}</option>`).join("")}</select> inside
+          <span class="unit-price"></span>
+        </div>
+        <div class="line-foot">
+          <span class="line-total"></span>
           <button type="button" class="icon-btn offer-add">🎁 Offer</button>
         </div>
         <div class="offer-line">
@@ -810,6 +840,8 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     card.querySelectorAll(".prod-item").forEach(el => {
       const it = products.find(p => p.id === el.dataset.id);
       const nameIn = el.querySelector(".ei-name"), priceIn = el.querySelector(".ei-price"), pcsIn = el.querySelector(".ei-pcs");
+      const qtyIn = el.querySelector(".ei-qty");
+      qtyIn.oninput = () => { it.qty = qtyIn.value; touched(); showUnitPrice(el, it); };
       const buyIn = el.querySelector(".ei-obuy"), freeIn = el.querySelector(".ei-ofree");
       const touched = () => { it.auto = false; el.querySelectorAll("input").forEach(i => i.classList.remove("autofilled")); };
       el.querySelector(".ei-del").onclick = () => { products = products.filter(p => p !== it); renderProducts(); };
@@ -837,17 +869,27 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       renderProductHint(el, it);
     });
   }
-  // The individual price inside the pack, worked out as you type: "= ₹50/kg".
+  // Worked out as you type: the price inside the pack ("→ ₹85 per pc") and the line amount
+  // ("10 × ₹2,440 = ₹24,400 for this line"). Also re-checks the lines against the invoice total.
   function showUnitPrice(el, it){
     const t = it.mode !== "loose" ? unitPriceText(it.price, it.perCase, it.packUnit) : "";
-    el.querySelector(".unit-price").textContent = t ? "= " + t : "";
+    el.querySelector(".unit-price").textContent = t ? "→ " + t.replace("/", " per ") : "";
+    const price = Number(it.price) || 0;
+    const unit = it.mode === "loose" ? "" : ` ${it.mode}${rowQty(it) !== 1 ? (it.mode === "box" ? "es" : "s") : ""}`;
+    el.querySelector(".line-total").textContent = price > 0
+      ? `${rowQty(it)}${unit} × ${inr(price)} = ${inr(rowAmount(it))}` : "";
+    renderLinesSum();
   }
-  // Loose: "₹ each". Pack: "₹ bag × [25] [kg] = ₹50/kg". The offer line shows once "🎁 Offer" is tapped (or one is saved).
+  // Loose = one item at "₹ each" (a 15 L tin is one item). A pack = "₹ per case", and "1 case has [9] pcs inside".
+  // The offer line shows once "🎁 Offer" is tapped (or one is saved).
   function showMode(el, it){
     const pack = it.mode !== "loose";
     el.querySelector(".ei-pack").value = it.mode;
-    el.querySelector(".ei-price").placeholder = pack ? `₹ ${it.mode}` : "₹ each";
-    el.querySelector(".pcs-wrap").style.display = pack ? "inline-flex" : "none";
+    el.querySelector(".ei-price").placeholder = pack ? `₹ per ${it.mode}` : "₹ each";
+    el.querySelector(".price-for").textContent = pack ? `/${it.mode}` : "each";
+    el.querySelector(".pack-line").style.display = pack ? "flex" : "none";
+    el.querySelector(".pack-has").textContent = `1 ${pack ? it.mode : "case"} has`;
+    el.querySelector(".ei-qty").placeholder = "1";
     el.querySelector(".ei-pcs").value = it.perCase ?? "";
     el.querySelector(".ei-unit").value = packUnitOf(it.packUnit);
     showUnitPrice(el, it);
@@ -912,6 +954,22 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       };
     });
   }
+  // "Lines add up to ₹24,400 — matches the invoice total" (or how far off it is)
+  function renderLinesSum(){
+    const box = $("linesSum");
+    const priced = products.filter(it => Number(it.price) > 0);
+    if (!priced.length){ box.textContent = ""; box.className = "lines-sum"; return; }
+    const sum = r2(priced.reduce((t, it) => t + rowAmount(it), 0));
+    const total = r2($("totalIn").value);
+    const diff = r2(total - sum);
+    let text = `Lines add up to ${inr(sum)}`, cls = "lines-sum";
+    if (total > 0 && Math.abs(diff) <= 1){ text += " ✓ matches the invoice total"; cls += " ok"; }
+    else if (total > 0){ text += ` — invoice total is ${inr(total)} (${diff > 0 ? "₹" + diff.toLocaleString("en-IN") + " more" : "₹" + (-diff).toLocaleString("en-IN") + " less"}; tax or a discount may explain it)`; cls += " off"; }
+    box.textContent = text;
+    box.className = cls;
+  }
+  $("totalIn").addEventListener("input", () => renderLinesSum());
+
   function refreshProductHints(){
     document.querySelectorAll("#productsCard .prod-item").forEach(el => {
       const it = products.find(p => p.id === el.dataset.id);
@@ -960,6 +1018,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     setPayMode(p.payMode || "cash");
     products = (p.items || []).map(it => newRow({
       name: it.name, price: it.price,
+      qty: Number(it.qty) > 0 ? it.qty : "",
       mode: packOrNull(it.perCase) ? packTypeOf(it.packType) : "loose", perCase: packOrNull(it.perCase) || "", packUnit: packUnitOf(it.packUnit), modeChosen: true,
       offerBuy: offerOrNull(it.offer) ? it.offer.buy : "", offerFree: offerOrNull(it.offer) ? it.offer.free : "", showOffer: !!offerOrNull(it.offer)
     }));
@@ -1052,6 +1111,9 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       if (!typed){ toast("A product has a price but no name — add the name or remove it"); return; }
       const price = r2(priceStr);
       const pack = it.mode !== "loose";
+      const qtyStr = String(it.qty ?? "").trim();
+      const qty = qtyStr === "" ? null : r2(qtyStr);
+      if (qtyStr !== "" && !(qty > 0)){ toast(`Enter how many ${typed} you bought (more than 0)`); return; }
       if (!(price > 0)){ toast(pack ? `Enter the ${it.mode} price for ${typed}` : `Enter a price for ${typed}`); return; }
       const perCase = pack ? packOrNull(it.perCase) : null;
       if (pack && !perCase){ toast(`Enter how many are in the ${it.mode} for ${typed}`); return; }
@@ -1061,7 +1123,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       if (offerTyped && !offer){ toast(`Enter the offer for ${typed} as Buy … get … free (whole numbers)`); return; }
       // "red label 500 gm" is saved as the existing "Red Label 500g", so one product keeps one name
       const existing = known.get(productKey(typed));
-      items.push({ name: existing ? existing.name : typed, price, perCase, packType: perCase ? it.mode : null, packUnit: perCase ? packUnitOf(it.packUnit) : null, offer });
+      items.push({ name: existing ? existing.name : typed, qty, price, perCase, packType: perCase ? it.mode : null, packUnit: perCase ? packUnitOf(it.packUnit) : null, offer });
     }
     // a "split" that is really all one mode is saved as that mode
     const used = Object.entries(pay).filter(([, v]) => v > 0).map(([k]) => k);
@@ -1175,7 +1237,6 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     return sumPeriod === "today" ? dateKey === today : (dateKey || "").slice(0, 7) === today.slice(0, 7);
   };
   const billDateKey = (b) => todayKey(b.createdAt && b.createdAt.toDate ? b.createdAt.toDate() : new Date());
-  const inr = (n) => "₹" + r2(n).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   function renderMoneySummary(){
     const ps = purchases.filter(p => inPeriod(p.invoiceDate));
     const sum = (rows, f) => r2(rows.reduce((t, x) => t + (Number(f(x)) || 0), 0));
