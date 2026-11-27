@@ -15,6 +15,8 @@
   .ok-tag{ font-family:var(--mono); font-weight:600; color:var(--accent-dark); margin-top:2px; text-align:right; }
   .was-tag{ font-family:var(--mono); font-size:11px; font-weight:700; margin-top:2px; text-align:right; }
   .was-tag.up{ color:var(--danger); }
+  .per-tag{ font-size:11px; color:var(--ink-soft); text-align:right; margin-top:1px; }
+  .mm-tag{ font-size:11.5px; font-weight:700; color:#8A5A00; margin-top:3px; }
   .was-tag.down{ color:var(--accent-dark); }
 </style>
 </head>
@@ -46,7 +48,7 @@
 import {
   requireShopOrRedirect, subscribePurchases, subscribeProducts, subscribeSuppliers,
   buildCatalog, productKey, unitLabel, unitPriceText, samePack, offerText,
-  effectivePack, effectivePackUnit, looseUnit
+  effectivePack, effectivePackUnit, effectivePackType, looseUnit, packMismatch, priceFor
 } from "./data.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -93,10 +95,12 @@ if (shop) {
     box.innerHTML = list.map(e => {
       const p = e.purchase;
       const bits = [];
-      if (e.mrp) bits.push(`MRP ${money(e.mrp)}`);
+      // every price says what it's for: "each" or "/ box of 16"
+      const pp = [effectivePack(e), effectivePackType(e), effectivePackUnit(e)];
+      if (e.mrp) bits.push(`MRP ${money(e.mrp)} ${escapeHtml(priceFor(...pp))}`);
       if (p){
         const each = unitPriceText(p.price, p.perCase, p.packUnit);   // ₹50/kg inside a ₹1250 bag of 25 kg
-        bits.push(`Bought ${money(p.price)}${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))}${each ? ` · ${each}` : ""}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
+        bits.push(`Bought ${money(p.price)} ${escapeHtml(priceFor(p.perCase, p.packType, p.packUnit))}${each ? ` · ${each}` : ""}${p.fromInvoice ? ` (${escapeHtml(supplierNameOf(p))}, ${fmtDate(p.date)})` : " (by hand)"}`);
       }
       if (p && p.fromInvoice && offerText(p.offer)) bits.push(`🎁 ${escapeHtml(offerText(p.offer))}`);
       // purchase price went up/down compared with the invoice before — only for the same pack
@@ -107,9 +111,10 @@ if (shop) {
         <div class="hi-left" style="min-width:0;">
           <b style="font-family:var(--sans);">${escapeHtml(e.name)}</b>
           <div>${bits.join(" · ") || (e.sellPrice ? "Only selling price set" : "No prices yet")}</div>
+          ${packMismatch(e) ? `<div class="mm-tag">⚠ Pack doesn't match the last invoice — tap to fix</div>` : ""}
         </div>
         <div style="flex-shrink:0; margin-left:10px;">
-          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div>${sellEach(e) ? `<div class="ok-tag" style="font-size:11.5px;">${sellEach(e)}</div>` : ""}` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
+          ${e.sellPrice ? `<div class="hi-right">${rupee(e.sellPrice)}</div><div class="per-tag">${escapeHtml(priceFor(...pp))}</div>${sellEach(e) ? `<div class="ok-tag" style="font-size:11.5px;">${sellEach(e)}</div>` : ""}` : `<div class="ok-tag" style="font-size:12.5px;">set price ✎</div>`}
           ${was}
         </div>
       </div>`;

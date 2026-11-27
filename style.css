@@ -304,6 +304,11 @@ input.autofilled{ border-color:var(--accent); background:var(--accent-soft); }
 .pe-pack-row select{ width:auto; padding:9px 10px; font-weight:600; }
 .pe-packline{ font-size:13px; color:var(--ink-soft); margin:-4px 2px 10px; }
 .pe-packline b{ color:var(--ink); }
+/* product pack and its last invoice line disagree — ask which is right */
+.pe-mismatch:empty{ display:none; }
+.pe-mismatch{ background:#FBF0D9; border:1px solid #EBD3A2; border-radius:14px; padding:12px; margin-bottom:10px; display:flex; flex-direction:column; gap:8px; }
+.pe-mm-text{ font-size:13px; line-height:1.5; color:#5E4410; }
+.pe-mismatch .btn{ width:100%; padding:10px; font-size:13px; }
 .pe-tiles{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .pe-tile{ background:var(--paper-panel); border:1px solid var(--line); border-radius:14px; padding:10px 12px; min-width:0; }
 .pe-tile.main{ background:var(--accent-soft); border-color:#BFDDD1; }

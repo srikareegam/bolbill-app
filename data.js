@@ -444,6 +444,32 @@ export async function deleteProduct(shopCode, name, hasInvoices, via = "") {
 // What a purchase line's pack holds (kg, pcs, …). When the product's own pack setting is the same
 // kind and size of pack, its unit wins: an invoice line saved before units existed (or left on the
 // default "pcs") for a product set as "bag of 26 kg" is read as 26 kg, so it gives ₹/kg, not ₹/pc.
+// The product's own pack setting ("Bought as") against the pack saved on its latest invoice line.
+// Returns that invoice line when they disagree — e.g. the product is "loose" but the invoice line
+// says "box of 10" — so the app can ask which one is right. Otherwise null.
+export function packMismatch(entry) {
+  if (!entry || !entry.packSet || !entry.purchase || !entry.purchase.fromInvoice) return null;
+  const last = entry.history && entry.history[0];
+  if (!last) return null;
+  return samePack(entry.pack, last.perCase, entry.packType, last.packType, entry.packUnit, last.packUnit) ? null : last;
+}
+// Correct the pack saved on a purchase's line(s) for one product. pack = { perCase, packType, packUnit },
+// or null for loose. Only the pack changes — the price, supplier and dates stay as they were.
+export async function setPurchaseLinePack(shopCode, purchaseId, name, pack) {
+  const ref = doc(db, "shops", shopCode, "purchases", purchaseId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("That purchase no longer exists");
+  const key = productKey(name), per = packOrNull(pack && pack.perCase);
+  const items = (snap.data().items || []).map(it => productKey(it.name) !== key ? it : Object.assign({}, it, {
+    perCase: per, packType: per ? packTypeOf(pack.packType) : null, packUnit: per ? packUnitOf(pack.packUnit) : null
+  }));
+  await updateDoc(ref, { items });
+}
+// "each" for a loose price, "per box of 16" for a pack price — so every price says what it's for.
+export function priceFor(perCase, packType, packUnit) {
+  return packOrNull(perCase) ? "per " + packText(perCase, packType, packUnit) : "each";
+}
+
 export function lineUnit(line, product) {
   if (!line || !packOrNull(line.perCase)) return null;
   if (product && product.packSet && product.pack === packOrNull(line.perCase) &&

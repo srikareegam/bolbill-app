@@ -13,7 +13,8 @@
 import {
   saveProductPrices, deleteProduct, renameProduct, productKey,
   packOrNull, packText, PACK_TYPES, PACK_UNITS, unitLabel, unitPriceText,
-  effectivePack, effectivePackType, effectivePackUnit, offerText, looseUnit, unitPrice
+  effectivePack, effectivePackType, effectivePackUnit, offerText, looseUnit, unitPrice,
+  packMismatch, setPurchaseLinePack, samePack, priceFor
 } from "./data.js";
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
@@ -40,6 +41,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
 
       <div class="pe-view">
         <div class="pe-packline"></div>
+        <div class="pe-mismatch"></div>
         <div class="pe-tiles"></div>
         <div class="btn-row" style="margin-top:12px;">
           <button class="btn btn-ghost pe-close">Close</button>
@@ -66,7 +68,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         </div>
         <div class="section-label" style="margin:14px 2px 8px;">Prices</div>
         <div class="pe-grid">
-          <div class="field"><label>MRP ₹</label><input type="number" class="pe-mrp" inputmode="decimal" placeholder="—"></div>
+          <div class="field"><label class="pe-mrp-label">MRP ₹</label><input type="number" class="pe-mrp" inputmode="decimal" placeholder="—"></div>
           <div class="field"><label class="pe-sell-label">Selling price ₹</label><input type="number" class="pe-sell" inputmode="decimal" placeholder="—"></div>
           <div class="field pe-loose-field" style="grid-column:span 2;"><label class="pe-loose-label">Loose selling ₹ (per kg)</label><input type="number" class="pe-loose" inputmode="decimal" placeholder="price when sold loose"></div>
           <div class="field" style="grid-column:span 2;"><label class="pe-buy-label">Purchase price ₹</label><input type="number" class="pe-buy" inputmode="decimal" placeholder="—"></div>
@@ -108,6 +110,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
   function renderView(){
     q(".pe-title").textContent = current.name;
     q(".pe-packline").innerHTML = `Bought as <b>${packText(effectivePack(current), effectivePackType(current), effectivePackUnit(current))}</b>`;
+    renderMismatch();
     const p = current.purchase;
     // For a pack product every price shows twice, separately: the whole pack (₹2275 / bag) and the
     // individual price inside it (₹87.50/kg). pack = { perCase, type, unit } that price is for.
@@ -119,7 +122,7 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
       <div class="pe-tile${field === "sellPrice" ? " main" : ""}"${wide ? ' style="grid-column:span 2;"' : ""}>
         <div class="pe-tlabel">${LABEL[field]}</div>
         <div class="pe-tval">${value != null ? money(value) : "—"}</div>
-        ${per && value != null ? `<div class="pe-tper">per ${escapeHtml(packText(pack.perCase, pack.type, pack.unit))}</div>` : ""}
+        ${value != null ? `<div class="pe-tper">${escapeHtml(per ? "per " + packText(pack.perCase, pack.type, pack.unit) : "each")}</div>` : ""}
         ${each ? `<div class="pe-teach">${escapeHtml(each)}</div>` : ""}
         <div class="pe-tnote">${value != null && note ? note : (value == null ? "not set" : "&nbsp;")}</div>
       </div>`;
@@ -153,6 +156,38 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         tile("purchasePrice", p ? p.price : null, buyNote, buyPack);
     }
     renderTimeline();
+  }
+
+  // The product says one pack ("loose") but its latest invoice line says another ("box of 10"):
+  // explain it and offer to correct whichever one is wrong.
+  function renderMismatch(){
+    const box = q(".pe-mismatch");
+    const last = packMismatch(current);
+    if (!last){ box.innerHTML = ""; return; }
+    const productPack = effectivePack(current)
+      ? { perCase: effectivePack(current), packType: effectivePackType(current), packUnit: effectivePackUnit(current) } : null;
+    const lastText = packText(last.perCase, last.packType, last.packUnit);
+    const productText = packText(productPack && productPack.perCase, productPack && productPack.packType, productPack && productPack.packUnit);
+    const each = unitPriceText(last.price, last.perCase, last.packUnit);
+    box.innerHTML = `
+      <div class="pe-mm-text">⚠ The ${escapeHtml(fmtDate(last.date))} invoice from <b>${escapeHtml(last.supplierName || "the supplier")}</b>
+        saved this as <b>${escapeHtml(lastText === "loose" ? "loose (1 piece)" : lastText)}</b> at <b>${money(last.price)}</b>${each ? ` (${escapeHtml(each)})` : ""},
+        but the product is set as <b>${escapeHtml(productText)}</b>. Which is right?</div>
+      <button type="button" class="btn btn-secondary pe-mm-invoice">It was ${escapeHtml(productText === "loose" ? "1 piece" : "a " + productText)} — correct the invoice</button>
+      <button type="button" class="btn btn-ghost pe-mm-product">It was ${escapeHtml(lastText === "loose" ? "1 piece" : "a " + lastText)} — correct the product</button>`;
+    q(".pe-mm-invoice").onclick = async () => {
+      try{ await setPurchaseLinePack(shopCode, last.purchaseId, current.name, productPack); toast("Invoice line corrected"); }
+      catch(e){ console.error(e); toast("Couldn't save — check your connection"); }
+    };
+    q(".pe-mm-product").onclick = async () => {
+      try{
+        await saveProductPrices(shopCode, current.name, {
+          mrp: current.mrp, sellPrice: current.sellPrice, sellLoose: current.sellLoose,
+          pack: last.perCase, packType: last.packType, packUnit: last.packUnit
+        }, false, { before: current, via });
+        toast("Product pack corrected");
+      }catch(e){ console.error(e); toast("Couldn't save — check your connection"); }
+    };
   }
 
   // Hand edits, renames and invoice prices in one list, newest first.
@@ -200,7 +235,8 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     q(".pe-pcs-wrap").style.visibility = t === "loose" ? "hidden" : "visible";
     const n = packOrNull(num(".pe-pcs")), unit = q(".pe-unitsel").value;
     q(".pe-buy-label").textContent = t === "loose" ? "Purchase price ₹ (each)" : `Purchase price ₹ (${n ? packText(n, t, unit) : "whole " + t})`;
-    q(".pe-sell-label").textContent = t === "loose" ? "Selling price ₹" : `Selling price ₹ (per ${t})`;
+    q(".pe-sell-label").textContent = t === "loose" ? "Selling price ₹ (each)" : `Selling price ₹ (per ${t})`;
+    q(".pe-mrp-label").textContent = t === "loose" ? "MRP ₹ (each)" : `MRP ₹ (per ${t})`;
     q(".pe-loose-field").style.display = t === "loose" ? "none" : "block";
     q(".pe-loose-label").textContent = `Loose selling ₹ (per ${looseUnit(unit)})`;
     updateBuyNote();
@@ -241,9 +277,18 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
     const t = packType();
     const each = t !== "loose" ? unitPriceText(num(".pe-buy"), packOrNull(num(".pe-pcs")), q(".pe-unitsel").value) : "";
     const source = q(".pe-buy").value.trim() !== buyAtOpen ? "Set by hand — the next invoice will update it again" : buyNote();
-    q(".pe-buy-note").textContent = [each ? "= " + each : "", source].filter(Boolean).join(" · ");
+    const last = lastInvoiceLine(), chosen = chosenPack();
+    const differs = last && q(".pe-buy").value.trim() === buyAtOpen &&
+      !samePack(last.perCase, chosen && chosen.perCase, last.packType, chosen && chosen.packType, last.packUnit, chosen && chosen.packUnit);
+    const warn = differs ? `⚠ this price was for ${packText(last.perCase, last.packType, last.packUnit) === "loose" ? "1 piece" : "a " + packText(last.perCase, last.packType, last.packUnit)} on the invoice` : "";
+    q(".pe-buy-note").textContent = [each ? "= " + each : "", source, warn].filter(Boolean).join(" · ");
   }
   q(".pe-buy").addEventListener("input", updateBuyNote);
+  // the latest invoice line, when the purchase price shown comes from it
+  const lastInvoiceLine = () => current && current.purchase && current.purchase.fromInvoice && current.history ? current.history[0] : null;
+  // the pack picked in the form, or null for loose
+  const chosenPack = () => packType() === "loose" ? null
+    : { perCase: packOrNull(num(".pe-pcs")), packType: packType(), packUnit: q(".pe-unitsel").value };
 
   function startEdit(prefillName = ""){
     q(".pe-title").textContent = current ? current.name : "New product";
@@ -282,6 +327,13 @@ export function mountProductEditor({ shopCode, toast, via = "", lookup = null, o
         packUnit: isPack ? q(".pe-unitsel").value : null,
         sellLoose: isPack ? num(".pe-loose") : null
       }, buyNow !== buyAtOpen, { before: current, via });
+      const last = lastInvoiceLine(), chosen = chosenPack();
+      if (last && !samePack(last.perCase, chosen && chosen.perCase, last.packType, chosen && chosen.packType, last.packUnit, chosen && chosen.packUnit)){
+        const from = packText(last.perCase, last.packType, last.packUnit), to = packText(chosen && chosen.perCase, chosen && chosen.packType, chosen && chosen.packUnit);
+        if (confirm(`The ${fmtDate(last.date)} invoice from ${last.supplierName || "the supplier"} saved this as ${from} at ${money(last.price)}.\n\nChange that invoice line to ${to} too?`)){
+          await setPurchaseLinePack(shopCode, last.purchaseId, name, chosen);
+        }
+      }
       toast(`Saved ${name}`);
       if (openedInEdit){ close(); }
       else {

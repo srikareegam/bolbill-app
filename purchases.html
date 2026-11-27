@@ -361,7 +361,7 @@ import {
   computeSupplierBalances, productKey, findPriceMatches,
   packOrNull, unitLabel, samePack, effectivePack, effectivePackType,
   PACK_TYPES, packTypeOf, packText, offerOrNull, offerText,
-  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit,
+  PACK_UNITS, packUnitOf, unitPriceText, effectivePackUnit, priceFor,
   subscribeProducts, buildCatalog
 } from "./data.js";
 import { compressForStorage, callGemini, geminiJson } from "./gemini.js";
@@ -880,7 +880,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     }
     const each = unitPriceText(last.price, last.perCase, last.packUnit);
     const source = last.fromInvoice ? `${escapeHtml(supplierNameOf(last))} · ${fmtDate(last.date)}` : "set in Products";
-    box.innerHTML = `last ${rupee(was)}${escapeHtml(unitLabel(last.perCase, last.packType, last.packUnit))}${each ? ` (${each})` : ""} · ${source}${change}`;
+    box.innerHTML = `last ${rupee(was)} ${escapeHtml(priceFor(last.perCase, last.packType, last.packUnit))}${each ? ` (${each})` : ""} · ${source}${change}`;
   }
   // Suggest known products (bought before or added in Products), so the same product keeps the same name.
   function renderProductSuggestions(el, it){
@@ -891,7 +891,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     const sub = (m) => {
       const p = m.purchase;
       if (!p) return m.sellPrice ? `selling ${rupee(m.sellPrice)}` : "no prices yet";
-      return `last ${rupee(p.price)}${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))} · ${p.fromInvoice ? escapeHtml(supplierNameOf(p)) : "set in Products"}`;
+      return `last ${rupee(p.price)} ${escapeHtml(priceFor(p.perCase, p.packType, p.packUnit))} · ${p.fromInvoice ? escapeHtml(supplierNameOf(p)) : "set in Products"}`;
     };
     box.innerHTML = matches.map(m => `
       <div class="autocomplete-item" data-key="${escapeHtml(m.key)}">

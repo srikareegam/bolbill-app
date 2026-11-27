@@ -146,7 +146,7 @@
 
 <script type="module">
 import { requireShopOrRedirect, subscribeSettings, createBillAtomic, subscribeCustomers, upsertCustomer, subscribePurchases, subscribeProducts, buildCatalog, findPriceMatches, productKey, unitLabel, unitPriceText,
-  effectivePack, effectivePackType, effectivePackUnit, looseUnit } from "./data.js";
+  effectivePack, effectivePackType, effectivePackUnit, looseUnit, priceFor } from "./data.js";
 import { mountCalculator } from "./calc.js";
 import { mountProductEditor } from "./product-editor.js";
 
@@ -292,11 +292,12 @@ if (shop) {
     if (exact){
       const modes = sellModes(exact);
       const bits = [];
-      if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b>`);
+      // every price says what it's for: "each" or "per bag of 26 kg"
+      if (exact.mrp) bits.push(`MRP <b>${money(exact.mrp)}</b> ${escapeHtml(priceFor(effectivePack(exact), effectivePackType(exact), effectivePackUnit(exact)))}`);
       if (exact.purchase){
         const p = exact.purchase, each = unitPriceText(p.price, p.perCase, p.packUnit);
         // pack price and the individual price inside it: "Bought ₹1250 / bag of 25 kg · ₹50/kg"
-        bits.push(`Bought <b>${money(p.price)}</b>${escapeHtml(unitLabel(p.perCase, p.packType, p.packUnit))}${each ? ` · <b>${each}</b>` : ""}`);
+        bits.push(`Bought <b>${money(p.price)}</b> ${escapeHtml(priceFor(p.perCase, p.packType, p.packUnit))}${each ? ` · <b>${each}</b>` : ""}`);
       }
       if (price == null){
         if (modes){
