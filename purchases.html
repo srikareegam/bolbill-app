@@ -53,6 +53,17 @@
   .prod-item{ position:relative; padding:6px 0; border-bottom:1px dashed var(--line); }
   .prod-item:last-child{ border-bottom:none; }
   .prod-item .edit-item-row{ padding:0; border-bottom:none; }
+  /* money summary (Suppliers tab) */
+  .ms-card{ padding:12px 14px; margin-bottom:10px; }
+  .ms-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:14px; font-weight:800; }
+  .ms-head b{ font-family:var(--mono); font-size:20px; color:var(--ink); white-space:nowrap; }
+  .ms-head small, .ms-row small{ font-weight:500; color:var(--ink-soft); font-size:11.5px; }
+  .ms-sub{ font-size:12px; color:var(--ink-soft); margin:2px 0 4px; }
+  .ms-sub:empty{ display:none; }
+  .ms-row{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:7px 0; border-top:1px dashed var(--line); font-size:13.5px; }
+  .ms-row b{ font-family:var(--mono); font-size:15px; white-space:nowrap; }
+  .ms-row.owed b{ color:var(--danger); font-size:17px; }
+  .ms-note{ font-size:11px; color:var(--ink-faint); margin-top:4px; }
   /* read-only purchase viewer */
   .pu-photo{ margin-bottom:12px; }
   .pu-photo:empty{ display:none; }
@@ -213,15 +224,35 @@
 
   <!-- ===== Suppliers ===== -->
   <div class="pur-sec" id="sec-suppliers">
-    <div class="summary-hero">
-      <div class="label">Owed to all suppliers</div>
-      <div class="value" id="owedTotal">₹0.00</div>
-      <div class="summary-stats">
-        <div class="stat-box"><div class="n" id="statSuppliers">0</div><div class="l">Suppliers</div></div>
-        <div class="stat-box"><div class="n" id="statMonth">₹0</div><div class="l">Bought this month</div></div>
-      </div>
+    <!-- Money summary: what was bought, how it was paid, what's still owed, and what was sold -->
+    <div class="filter-row" id="sumChips">
+      <div class="filter-chip" data-p="today">Today</div>
+      <div class="filter-chip" data-p="month">This month</div>
+      <div class="filter-chip active" data-p="all">All time</div>
     </div>
-    <button class="btn btn-secondary btn-full" id="btnNewSupplier" style="margin-bottom:12px;">+ Add supplier</button>
+    <div class="card ms-card">
+      <div class="ms-head"><span>Stock purchased</span><b id="msBought">₹0</b></div>
+      <div class="ms-sub" id="msBoughtSub"></div>
+      <div class="ms-row"><span>Paid in cash</span><b id="msCash">₹0</b></div>
+      <div class="ms-row"><span>Paid by UPI</span><b id="msUpi">₹0</b></div>
+      <div class="ms-row"><span>Taken on credit</span><b id="msCredit">₹0</b></div>
+      <div class="ms-note">Cash + UPI + credit = stock purchased</div>
+    </div>
+    <div class="card ms-card">
+      <div class="ms-head"><span>Credit</span><b id="msCreditTaken">₹0 taken</b></div>
+      <div class="ms-row"><span>Paid back later</span><b id="msPaidBack">₹0</b></div>
+      <div class="ms-sub" id="msPaidBackSub"></div>
+      <div class="ms-row owed"><span>Still owed to suppliers <small>(now, all time)</small></span><b id="msOwed">₹0</b></div>
+    </div>
+    <div class="card ms-card">
+      <div class="ms-head"><span>Sales <small>(from your bills)</small></span><b id="msSales">₹0</b></div>
+      <div class="ms-sub" id="msSalesSub"></div>
+    </div>
+
+    <div class="section-label" style="margin-top:18px;">
+      <span>Suppliers</span>
+      <span style="margin-left:auto;"><button class="icon-btn" id="btnNewSupplier">+ Add supplier</button></span>
+    </div>
     <div id="supList"></div>
   </div>
 
@@ -324,7 +355,7 @@
 <script type="module">
 import {
   requireShopOrRedirect, subscribeSettings, todayKey,
-  subscribeSuppliers, addSupplier, updateSupplier, deleteSupplier,
+  subscribeSuppliers, addSupplier, updateSupplier, deleteSupplier, subscribeBills,
   subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
   subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
   computeSupplierBalances, productKey, findPriceMatches,
@@ -398,6 +429,8 @@ if (shop) {
     }
   });
   subscribeSupplierPayments(shop.shopCode, (rows) => { payments = rows; refreshAll(); });
+  let bills = [];    // sales, for the money summary
+  subscribeBills(shop.shopCode, (rows) => { bills = rows; renderMoneySummary(); });
   subscribeProducts(shop.shopCode, (rows) => { productDocs = rows; refreshAll(); });
 
   function refreshAll(){
@@ -1123,12 +1156,53 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
   // =====================================================================
   // Suppliers & account sheet
   // =====================================================================
+  // ---------- Money summary ----------
+  // Every rupee is counted once:
+  //   stock purchased = paid in cash + paid by UPI + taken on credit   (at purchase time)
+  //   credit is then paid back later (supplier payments) — shown under Credit, not added to cash/UPI
+  //   still owed = credit taken − paid back, for all suppliers, all time (the real amount due today)
+  let sumPeriod = "all";
+  document.querySelectorAll("#sumChips .filter-chip").forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll("#sumChips .filter-chip").forEach(c => c.classList.toggle("active", c === chip));
+      sumPeriod = chip.dataset.p;
+      renderMoneySummary();
+    };
+  });
+  const inPeriod = (dateKey) => {
+    if (sumPeriod === "all") return true;
+    const today = todayKey();
+    return sumPeriod === "today" ? dateKey === today : (dateKey || "").slice(0, 7) === today.slice(0, 7);
+  };
+  const billDateKey = (b) => todayKey(b.createdAt && b.createdAt.toDate ? b.createdAt.toDate() : new Date());
+  const inr = (n) => "₹" + r2(n).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  function renderMoneySummary(){
+    const ps = purchases.filter(p => inPeriod(p.invoiceDate));
+    const sum = (rows, f) => r2(rows.reduce((t, x) => t + (Number(f(x)) || 0), 0));
+    // older purchases saved before the cash/UPI/credit split count their unpaid part as credit
+    const payOf = (p) => p.pay || { cash: p.paidNow || 0, upi: 0, credit: (p.total || 0) - (p.paidNow || 0) };
+    const bought = sum(ps, p => p.total), cash = sum(ps, p => payOf(p).cash), upi = sum(ps, p => payOf(p).upi), credit = sum(ps, p => payOf(p).credit);
+    $("msBought").textContent = inr(bought);
+    $("msBoughtSub").textContent = `${ps.length} purchase${ps.length !== 1 ? "s" : ""}`;
+    $("msCash").textContent = inr(cash);
+    $("msUpi").textContent = inr(upi);
+    $("msCredit").textContent = inr(credit);
+
+    const pays = payments.filter(p => inPeriod(p.date));
+    const backCash = sum(pays.filter(p => p.payMode !== "upi"), p => p.amount), backUpi = sum(pays.filter(p => p.payMode === "upi"), p => p.amount);
+    $("msCreditTaken").textContent = `${inr(credit)} taken`;
+    $("msPaidBack").textContent = inr(backCash + backUpi);
+    $("msPaidBackSub").textContent = pays.length ? `cash ${inr(backCash)} · UPI ${inr(backUpi)}` : "";
+    const owed = Object.values(balances).reduce((t, b) => t + (b > 0 ? b : 0), 0);
+    $("msOwed").textContent = inr(owed);
+
+    const bs = bills.filter(b => inPeriod(billDateKey(b)));
+    $("msSales").textContent = inr(sum(bs, b => b.total));
+    $("msSalesSub").textContent = `${bs.length} bill${bs.length !== 1 ? "s" : ""}`;
+  }
+
   function renderSuppliers(){
-    const owed = Object.values(balances).reduce((s, b) => s + (b > 0 ? b : 0), 0);
-    $("owedTotal").textContent = rupee(owed);
-    $("statSuppliers").textContent = suppliers.length;
-    const month = todayKey().slice(0, 7);
-    $("statMonth").textContent = "₹" + Math.round(purchases.filter(p => (p.invoiceDate || "").slice(0, 7) === month).reduce((s, p) => s + (p.total || 0), 0)).toLocaleString("en-IN");
+    renderMoneySummary();
 
     const box = $("supList");
     if (suppliers.length === 0){ box.innerHTML = `<div class="history-empty">No suppliers yet — add one, or type a new name on a purchase</div>`; return; }
