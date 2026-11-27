@@ -67,7 +67,7 @@
   /* read-only purchase viewer */
   .pu-photo{ margin-bottom:12px; }
   .pu-photo:empty{ display:none; }
-  .pu-photo img{ display:block; width:100%; height:180px; object-fit:cover; object-position:top; border-radius:12px; border:1px solid var(--line); cursor:zoom-in; }
+  .pu-photo img{ display:block; width:100%; height:160px; object-fit:cover; object-position:top; border-radius:12px; border:1px solid var(--line); cursor:zoom-in; }
   .pu-photo .pu-hint{ font-size:11.5px; color:var(--ink-soft); text-align:center; margin-top:4px; }
   .pu-prod{ display:flex; justify-content:space-between; gap:10px; padding:9px 2px; border-bottom:1px dashed var(--line); font-size:13.5px; }
   .pu-prod:last-child{ border-bottom:none; }
@@ -131,6 +131,25 @@
   .pv-scroll img{ display:block; width:100%; height:auto; cursor:zoom-in; }
   .photo-viewer.actual .pv-scroll img{ width:auto; max-width:none; cursor:zoom-out; }
   .pv-close{ position:absolute; top:calc(12px + env(safe-area-inset-top)); right:12px; z-index:2; width:42px; height:42px; border-radius:50%; border:2px solid rgba(255,255,255,0.85); background:rgba(0,0,0,0.75); color:#fff; font-size:18px; cursor:pointer; }
+  .pv-page{ color:#ddd; font-size:12.5px; font-weight:700; padding:10px 14px 6px; background:#111; }
+  .pv-page:first-child{ padding-top:calc(16px + env(safe-area-inset-top)); }
+  /* invoice pages in the form: a row of thumbnails + "＋ Page 2" */
+  .pages-wrap{ display:none; }
+  .pages-wrap.show{ display:block; }
+  .pages-strip{ display:flex; gap:10px; overflow-x:auto; padding:2px 2px 4px; }
+  .page-thumb{ position:relative; flex:0 0 76px; height:100px; border-radius:10px; overflow:hidden; border:1px solid var(--line); background:#eee; cursor:zoom-in; }
+  .page-thumb img{ width:100%; height:100%; object-fit:cover; object-position:top; display:block; }
+  .page-thumb .pg-no{ position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,0.62); color:#fff; font-size:11px; font-weight:700; text-align:center; padding:3px 0; }
+  .page-thumb .pg-del{ position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,0.65); color:#fff; font-size:12px; cursor:pointer; }
+  .page-add{ position:relative; flex:0 0 76px; height:100px; border-radius:10px; border:2px dashed var(--accent); background:var(--accent-soft); color:var(--accent-dark);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:12px; font-weight:700; cursor:pointer; text-align:center; }
+  .page-add .pa-plus{ font-size:22px; line-height:1; }
+  .page-add input{ position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; }
+  .pa-gallery{ display:block; margin-top:4px; color:var(--accent-dark); font-weight:600; text-decoration:underline; cursor:pointer; }
+  .pages-note{ font-size:12px; color:var(--ink-soft); margin-top:6px; line-height:1.45; }
+  .pages-note b{ color:var(--accent-dark); }
+  .pu-photo .pu-page{ font-size:11.5px; font-weight:700; color:var(--ink-soft); margin:8px 0 4px; }
+  .pu-photo .pu-page:first-child{ margin-top:0; }
   .pv-hint{ position:absolute; bottom:calc(14px + env(safe-area-inset-bottom)); left:0; right:0; text-align:center; color:#bbb; font-size:12px; pointer-events:none; }
 </style>
 </head>
@@ -167,13 +186,10 @@
           <input type="file" id="galleryInput" accept="image/*" style="display:none;">
         </label>
       </div>
-      <div class="sticker-preview" id="photoPreview" style="margin-top:0;">
-        <img id="photoThumb" src="" alt="Invoice photo" title="Tap to view full size">
-        <div class="sp-info">
-          <div class="sp-name">Invoice photo</div>
-          <div class="sp-size" id="photoSize"></div>
-        </div>
-        <button class="sp-clear" id="photoClear" title="Remove photo">✕</button>
+      <!-- invoice pages: thumbnails + "＋ Page 2" for long bills -->
+      <div class="pages-wrap" id="pagesWrap">
+        <div class="pages-strip" id="pagesStrip"></div>
+        <div class="pages-note" id="pagesNote"></div>
       </div>
       <!-- simple one-line status (used when opening a saved purchase's photo) -->
       <div class="load-line" id="scanStatus" style="display:none;"><span class="spinner dark"></span><span id="scanStatusText"></span></div>
@@ -181,7 +197,7 @@
       <!-- step-by-step progress while a new photo is prepared and read -->
       <div class="scan-panel" id="scanPanel">
         <div class="scan-visual" id="scanVisual"><img id="scanImg" src="" alt=""><div class="scan-line"></div></div>
-        <div class="scan-step" id="stepPrep"><span class="st-icon"></span><span class="st-text">Getting the photo ready</span></div>
+        <div class="scan-step" id="stepPrep"><span class="st-icon"></span><span class="st-text" id="stepPrepText">Getting the photo ready</span></div>
         <div class="scan-step" id="stepRead"><span class="st-icon"></span><span class="st-text" id="stepReadText">Reading supplier, invoice no., date &amp; total</span><span class="st-time" id="readTimer"></span></div>
         <div class="scan-result" id="scanResult"></div>
       </div>
@@ -281,7 +297,7 @@
 
 <!-- Full-screen invoice viewer -->
 <div class="photo-viewer" id="photoViewer">
-  <div class="pv-scroll" id="pvScroll"><img id="pvImg" src="" alt="Invoice"></div>
+  <div class="pv-scroll" id="pvScroll"></div>
   <button class="pv-close" id="pvClose">✕</button>
   <div class="pv-hint">Tap the photo to zoom</div>
 </div>
@@ -370,7 +386,7 @@
 import {
   requireShopOrRedirect, subscribeSettings, todayKey,
   subscribeSuppliers, addSupplier, updateSupplier, deleteSupplier, subscribeBills,
-  subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhoto,
+  subscribePurchases, createPurchase, updatePurchase, deletePurchase, getPurchasePhotos, photoPageCount, MAX_PHOTO_PAGES,
   subscribeSupplierPayments, addSupplierPayment, deleteSupplierPayment,
   computeSupplierBalances, productKey, findPriceMatches,
   packOrNull, unitLabel, samePack, effectivePack, effectivePackType,
@@ -474,8 +490,9 @@ if (shop) {
   let editingId = null;           // purchase being edited, null for a new one
   let selectedSupplier = null;    // { id, name }
   let payMode = "cash";
-  let photoB64 = null;            // photo currently shown in the form
-  let photoChanged = false;       // in edit mode: photo replaced or removed since loading
+  let photos = [];                // invoice pages in the form: [{ key, b64 }], page 1 first
+  let photoChanged = false;       // in edit mode: a page added or removed since loading
+  let pageSeq = 0;                // gives each page a key, so products read from it can be traced back
   let busy = false;               // compressing / reading a photo
   let scannedSupplierExtras = {}; // phone/gstin read from the invoice, used to prefill "add supplier"
 
@@ -513,15 +530,47 @@ if (shop) {
   document.querySelectorAll("#modeChips .filter-chip").forEach(c => c.onclick = () => setPayMode(c.dataset.mode));
   ["totalIn", "splitCash", "splitUpi"].forEach(id => $(id).oninput = renderPay);
 
-  // ---------- Photo ----------
-  function showPhoto(b64, sizeNote){
-    photoB64 = b64;
-    if (b64){
-      $("photoThumb").src = imgSrc(b64);
-      $("photoSize").textContent = sizeNote || `${Math.round(b64.length * 3 / 4 / 1024)} KB · tap photo to view`;
-    }
-    $("photoPreview").classList.toggle("show", !!b64);
-    $("photoPick").style.display = b64 ? "none" : "block";
+  // ---------- Invoice pages ----------
+  const newPage = (b64) => ({ key: "pg" + (++pageSeq), b64 });
+  function setPhotos(list){ photos = list; renderPages(); }
+  function renderPages(){
+    const n = photos.length;
+    $("photoPick").style.display = (n || busy) ? "none" : "block";
+    $("pagesWrap").classList.toggle("show", n > 0 && !busy);
+    if (!n){ $("pagesStrip").innerHTML = ""; $("pagesNote").innerHTML = ""; return; }
+    const canAdd = n < MAX_PHOTO_PAGES;
+    $("pagesStrip").innerHTML = photos.map((pg, i) => `
+      <div class="page-thumb" data-i="${i}" title="Tap to view">
+        <img src="${imgSrc(pg.b64)}" alt="Page ${i + 1}">
+        <span class="pg-no">Page ${i + 1}</span>
+        <button type="button" class="pg-del" data-i="${i}" title="Remove page ${i + 1}">✕</button>
+      </div>`).join("") + (canAdd ? `
+      <label class="page-add" title="Photograph the next page"><span class="pa-plus">＋</span><span>📷 Page ${n + 1}</span>
+        <input type="file" accept="image/*" capture="environment" class="pa-input"></label>` : "");
+    const kb = Math.round(photos.reduce((a, pg) => a + pg.b64.length, 0) * 3 / 4 / 1024);
+    $("pagesNote").innerHTML = (n === 1 ? `1 page · ${kb} KB · tap it to view` : `<b>${n} pages</b> · ${kb} KB · tap a page to view`)
+      + (canAdd ? `<br>Bill continues on another page? Tap <b>＋ Page ${n + 1}</b> — its products are added below.
+          <label class="pa-gallery">🖼 or pick page ${n + 1} from the gallery<input type="file" accept="image/*" class="pa-input" hidden></label>`
+        : `<br>That's the most pages one purchase can hold (${MAX_PHOTO_PAGES}).`);
+    $("pagesStrip").querySelectorAll(".page-thumb").forEach(el => el.onclick = (e) => {
+      if (e.target.closest(".pg-del")) return;
+      openViewer(photos.map(pg => pg.b64), Number(el.dataset.i));
+    });
+    $("pagesStrip").querySelectorAll(".pg-del").forEach(b => b.onclick = () => removePage(Number(b.dataset.i)));
+    $("pagesWrap").querySelectorAll(".pa-input").forEach(inp => inp.onchange = () => handlePhotoInput(inp));
+  }
+  // Removing a page also drops the products read from it — unless the user already changed them.
+  function removePage(i){
+    const pg = photos[i];
+    if (!pg) return;
+    const fromPage = products.filter(it => it.pageKey === pg.key && it.auto);
+    if (photos.length > 1 && !confirm(`Remove page ${i + 1}?${fromPage.length ? `\n\nThe ${fromPage.length} product${fromPage.length === 1 ? "" : "s"} read from it will be removed too.` : ""}`)) return;
+    photos = photos.filter((_, j) => j !== i);
+    photoChanged = true;
+    if (fromPage.length){ products = products.filter(it => !fromPage.includes(it)); renderProducts(); }
+    if (!photos.length) resetScanPanel();
+    renderPages();
+    if (photos.length) toast(`Page ${i + 1} removed${fromPage.length ? ` · ${fromPage.length} product${fromPage.length === 1 ? "" : "s"} with it` : ""}`);
   }
   const saveLabel = () => editingId ? "💾 Save changes" : "💾 Save purchase";
   // While a photo is being prepared/read the Save button says so, instead of just going grey.
@@ -529,6 +578,7 @@ if (shop) {
     busy = on;
     $("btnSave").disabled = on;
     $("btnSave").textContent = on ? btnText : saveLabel();
+    renderPages();   // no adding/removing pages while one is being read
   }
   function setLoadLine(msg){
     $("scanStatus").style.display = msg ? "flex" : "none";
@@ -545,6 +595,7 @@ if (shop) {
     $("scanResult").className = "scan-result";
     $("scanResult").innerHTML = "";
     $("stepReadText").textContent = "Reading supplier, invoice no., date & total";
+    $("stepPrepText").textContent = "Getting the photo ready";
     setStep("stepPrep", ""); setStep("stepRead", "");
   }
   function showScanResult(kind, html){
@@ -578,12 +629,19 @@ if (shop) {
   async function handlePhotoInput(input){
     const file = input.files[0];
     input.value = "";
-    if (!file) return;
+    if (!file || busy) return;
     if (!file.type.startsWith("image/")){ toast("Please pick a photo"); return; }
+    if (photos.length >= MAX_PHOTO_PAGES){ toast(`At most ${MAX_PHOTO_PAGES} pages per purchase`); return; }
+    const pageNo = photos.length + 1;
+    const multi = pageNo > 1;
     resetScanPanel();
     $("scanPanel").classList.add("show");
+    if (multi){
+      $("stepPrepText").textContent = `Getting page ${pageNo} ready`;
+      $("stepReadText").textContent = `Reading the products on page ${pageNo}`;
+    }
     setStep("stepPrep", "active");
-    setBusy(true);
+    setBusy(true, multi ? `⏳ Wait — reading page ${pageNo}…` : undefined);
     let b64;
     try{
       b64 = await compressForStorage(file);
@@ -596,46 +654,42 @@ if (shop) {
       return;
     }
     setStep("stepPrep", "done");
-    showPhoto(b64);
+    const page = newPage(b64);
+    photos = photos.concat(page);
     photoChanged = true;
 
     const key = settings.geminiKey && settings.geminiKey.trim();
     if (!key){
       setStep("stepRead", "skip");
       $("stepReadText").textContent = "Auto-reading is off";
-      showScanResult("warn", `The photo will be saved with this purchase. Type the supplier and total below.<br>To fill them in automatically next time, set up the free Gemini key on the <a href="orders.html">Orders</a> page.`);
+      showScanResult("warn", `${multi ? `Page ${pageNo} added — it` : "The photo"} will be saved with this purchase. Type the ${multi ? "products" : "supplier and total"} below.<br>To fill them in automatically next time, set up the free Gemini key on the <a href="orders.html">Orders</a> page.`);
       setBusy(false);
       return;
     }
     setStep("stepRead", "active");
     $("scanImg").src = imgSrc(b64);
-    $("scanVisual").classList.add("show");
-    $("photoPreview").classList.remove("show");   // the big scanning copy replaces the small thumbnail meanwhile
+    $("scanVisual").classList.add("show");   // the big scanning copy replaces the page strip meanwhile
     startReadTimer();
     try{
-      const found = applyScan(geminiJson(await callGemini(key, b64, INVOICE_PROMPT)));
+      const prompt = multi ? pagePrompt(pageNo) + INVOICE_PROMPT : INVOICE_PROMPT;
+      const found = applyScan(geminiJson(await callGemini(key, b64, prompt)), { pageNo, pageKey: page.key });
       setStep("stepRead", "done");
       if (found.length){
-        showScanResult("ok", `<b>Found on the invoice — please check:</b><ul>${found.map(f => `<li>${f}</li>`).join("")}</ul>`);
+        showScanResult("ok", `<b>${multi ? `Page ${pageNo} — found:` : "Found on the invoice — please check:"}</b><ul>${found.map(f => `<li>${f}</li>`).join("")}</ul>`);
       } else {
-        showScanResult("warn", "Couldn't find the supplier or total on this photo. Type them below, or retake a clearer photo.");
+        showScanResult("warn", multi
+          ? `Couldn't find any products on page ${pageNo}. Type them below, or remove the page and take a clearer photo.`
+          : "Couldn't find the supplier or total on this photo. Type them below, or retake a clearer photo.");
       }
     }catch(e){
       console.error(e);
       setStep("stepRead", "fail");
-      showScanResult("warn", `${friendlyReadError(e)} The photo is still attached — type the supplier and total below.`);
+      showScanResult("warn", `${friendlyReadError(e)} The ${multi ? "page" : "photo"} is still attached — type the ${multi ? "products" : "supplier and total"} below.`);
     }
     stopReadTimer();
     $("scanVisual").classList.remove("show");
-    $("photoPreview").classList.toggle("show", !!photoB64);
     setBusy(false);
   }
-  $("photoClear").onclick = () => {
-    showPhoto(null);
-    photoChanged = true;
-    resetScanPanel();
-  };
-  $("photoThumb").onclick = () => openViewer(photoB64);
 
   // ---------- Purchase viewer (read only) ----------
   // Tapping a purchase anywhere (History, a supplier's account, a product's price history) opens this
@@ -662,17 +716,19 @@ if (shop) {
     const box = $("pu-photo");
     box.innerHTML = "";
     openModal("modalPurView");
-    if (!p.hasPhoto) return;
-    box.innerHTML = `<div class="load-line" style="margin:0;"><span class="spinner dark"></span><span>Loading the invoice photo…</span></div>`;
+    const pageCount = photoPageCount(p);
+    if (!pageCount) return;
+    box.innerHTML = `<div class="load-line" style="margin:0;"><span class="spinner dark"></span><span>Loading the invoice ${pageCount > 1 ? `photos (${pageCount} pages)` : "photo"}…</span></div>`;
     try{
-      const b64 = await getPurchasePhoto(shop.shopCode, p.id);
+      const list = await getPurchasePhotos(shop.shopCode, p);
       if (viewingId !== p.id) return;                 // another purchase was opened meanwhile
-      if (!b64){ box.innerHTML = ""; return; }
-      box.innerHTML = `<img src="${imgSrc(b64)}" alt="Invoice photo"><div class="pu-hint">Tap the photo to see it full size</div>`;
-      box.querySelector("img").onclick = () => openViewer(b64);
+      if (!list.length){ box.innerHTML = ""; return; }
+      box.innerHTML = list.map((b64, i) => `${list.length > 1 ? `<div class="pu-page">Page ${i + 1} of ${list.length}</div>` : ""}<img src="${imgSrc(b64)}" alt="Invoice page ${i + 1}" data-i="${i}">`).join("")
+        + `<div class="pu-hint">Tap ${list.length > 1 ? "a page" : "the photo"} to see it full size</div>`;
+      box.querySelectorAll("img").forEach(img => img.onclick = () => openViewer(list, Number(img.dataset.i)));
     }catch(e){
       console.error(e);
-      if (viewingId === p.id) box.innerHTML = `<div class="hint" style="margin:0;">Couldn't load the photo — check your connection</div>`;
+      if (viewingId === p.id) box.innerHTML = `<div class="hint" style="margin:0;">Couldn't load the invoice photo — check your connection</div>`;
     }
   }
   const openPurchaseById = (id) => { const p = purchases.find(x => x.id === id); if (p) openPurchaseView(p); };
@@ -684,14 +740,18 @@ if (shop) {
     if (p) loadPurchaseIntoForm(p);
   };
 
-  function openViewer(b64){
-    if (!b64) return;
-    $("pvImg").src = imgSrc(b64);
+  // Full-screen view of every page, one under the other, opened at the page that was tapped.
+  function openViewer(list, start = 0){
+    list = (Array.isArray(list) ? list : [list]).filter(Boolean);
+    if (!list.length) return;
+    $("pvScroll").innerHTML = list.map((b64, i) =>
+      `${list.length > 1 ? `<div class="pv-page" id="pvPage${i}">Page ${i + 1} of ${list.length}</div>` : ""}<img src="${imgSrc(b64)}" alt="Invoice page ${i + 1}">`).join("");
+    $("pvScroll").querySelectorAll("img").forEach(img => img.onclick = () => $("photoViewer").classList.toggle("actual"));
     $("photoViewer").classList.remove("actual");
     $("photoViewer").classList.add("show");
     $("pvScroll").scrollTo(0, 0);
+    if (start > 0) requestAnimationFrame(() => { const el = $("pvPage" + start); if (el) $("pvScroll").scrollTo(0, el.offsetTop); });
   }
-  $("pvImg").onclick = () => $("photoViewer").classList.toggle("actual");
   $("pvClose").onclick = () => $("photoViewer").classList.remove("show");
 
   // ---------- Auto-fill from the invoice photo (Gemini) ----------
@@ -702,16 +762,21 @@ Important: a single tin, bottle, packet or bag sold as one item is ONE piece —
 - If the line is bought by the case, bag, box or carton and the count inside is printed (e.g. "1x12", "CS/12", "10 pcs", "12 Nos", "25 kg bag"), price = the rate for ONE whole pack, perCase = how much is in it, packType = "case", "bag", "box" or "carton", and packUnit = what perCase counts: "pcs", "kg", "g", "ltr" or "ml" (e.g. a 25 kg bag -> perCase 25, packUnit "kg").
 - Otherwise price = the rate for ONE piece and perCase = 0, packType = "", packUnit = "".
 - If the line shows free goods / a scheme (e.g. "Free 1", "Sch 10+1", "10+1"), offerBuy = the quantity bought and offerFree = the free quantity; otherwise both 0.
-Use the rate column, not the line amount. If only quantity and line amount are shown, price = amount ÷ quantity. Keep the pack size of each piece in the name as printed (e.g. "Real Juice 1L").
+Skip "b/f", "c/f", "brought forward" and "carried forward" subtotal lines — they are not products, and a page subtotal is not the grand total (use 0 if no grand total is printed). Use the rate column, not the line amount. If only quantity and line amount are shown, price = amount ÷ quantity. Keep the pack size of each piece in the name as printed (e.g. "Real Juice 1L").
 IMPORTANT: Keep the supplier name and product names in EXACTLY the script they were written in — Telugu stays in Telugu script, do NOT translate or transliterate.
 invoiceDate must be YYYY-MM-DD, or "" if not shown. total is a plain number with no currency symbol or commas (0 if not shown).
 Respond with ONLY minified JSON, no markdown fences, exactly matching this shape:
 {"supplier":{"name":"","phone":"","gstin":""},"invoiceNo":"","invoiceDate":"","total":0,"items":[{"name":"","qty":1,"price":0,"perCase":0,"packType":"","packUnit":"","offerBuy":0,"offerFree":0}]}`;
 
+  // Extra instructions in front of INVOICE_PROMPT when the photo is a later page of a long bill.
+  const pagePrompt = (n) => `This photo is PAGE ${n} of a multi-page invoice; the earlier pages were already read. List ONLY the product lines printed on this page (skip "b/f" / "brought forward" / "c/f" subtotal lines — they are not products). total = the final grand total only if it is printed on this page, otherwise 0. If the supplier, invoice number or date are not on this page, leave them empty.\n\n`;
+
   // Only fills fields that are still empty, so replacing a photo never overwrites what the user typed.
   // Returns one line per filled field for the "Found on the invoice" box; filled inputs get tinted.
-  function applyScan(parsed){
+  // page: { pageNo, pageKey } — products read from a page remember it, so removing the page removes them.
+  function applyScan(parsed, page = { pageNo: 1, pageKey: null }){
     const found = [];
+    const later = page.pageNo > 1;
     const fill = (id, value) => { $(id).value = value; $(id).classList.add("autofilled"); };
     const sup = parsed.supplier || {};
     scannedSupplierExtras = { phone: sup.phone || "", gstin: sup.gstin || "" };
@@ -740,9 +805,12 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       found.push(`Date: <b>${fmtDate(parsed.invoiceDate)}</b>`);
     }
     const total = r2(String(parsed.total ?? "").replace(/[^\d.]/g, ""));
-    if (total > 0 && !(r2($("totalIn").value) > 0)){
+    // the grand total is usually on the last page, so a later page may replace a total
+    // the photo filled in earlier — but never one the user typed
+    const totalFromPhoto = $("totalIn").classList.contains("autofilled");
+    if (total > 0 && (!(r2($("totalIn").value) > 0) || (later && totalFromPhoto && total !== r2($("totalIn").value)))){
       fill("totalIn", total);
-      found.push(`Total: <b>${rupee(total)}</b>`);
+      found.push(`Total: <b>${rupee(total)}</b>${later ? ` (from page ${page.pageNo})` : ""}`);
     }
     const scanned = (Array.isArray(parsed.items) ? parsed.items : [])
       .map(it => ({
@@ -754,15 +822,17 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       }))
       .filter(it => it.name);
     const productsTyped = products.some(it => String(it.name ?? "").trim() || String(it.price ?? "").trim());
-    if (scanned.length && !productsTyped){
-      products = scanned.map(it => newRow({
-        name: it.name, price: it.price > 0 ? it.price : "", auto: true,
+    if (scanned.length && (later || !productsTyped)){
+      // page 1 fills an empty list; later pages add their lines under what is already there
+      const keep = later ? products.filter(it => String(it.name ?? "").trim() || String(it.price ?? "").trim()) : [];
+      products = keep.concat(scanned.map(it => newRow({
+        name: it.name, price: it.price > 0 ? it.price : "", auto: true, pageKey: page.pageKey,
         qty: it.qty, mode: it.perCase ? it.packType : "loose", perCase: it.perCase || "", packUnit: it.packUnit, modeChosen: !!it.perCase,
         offerBuy: it.offer ? it.offer.buy : "", offerFree: it.offer ? it.offer.free : "", showOffer: !!it.offer
-      }));
+      })));
       renderProducts();
       const noPrice = scanned.filter(it => !(it.price > 0)).length;
-      found.push(`Products: <b>${scanned.length} read</b> — check names &amp; prices${noPrice ? ` (${noPrice} without a price — fill them in)` : ""}`);
+      found.push(`Products: <b>${scanned.length} ${later ? `added from page ${page.pageNo}` : "read"}</b>${later ? ` (${products.length} in all)` : ""} — check names &amp; prices${noPrice ? ` (${noPrice} without a price — fill them in)` : ""}`);
     }
     renderPay();
     if (newSupplierName){
@@ -989,7 +1059,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     selectedSupplier = null;
     scannedSupplierExtras = {};
     photoChanged = false;
-    showPhoto(null);
+    setPhotos([]);
     ["supName", "invNo", "totalIn", "splitCash", "splitUpi", "noteIn"].forEach(id => $(id).value = "");
     $("invDate").value = todayKey();
     ["supName", "invNo", "invDate", "totalIn"].forEach(id => $(id).classList.remove("autofilled"));
@@ -1030,13 +1100,14 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     closeModal("modalLedger");
     ledgerSupplierId = null;
     showTab("new");
-    if (p.hasPhoto){
+    const pageCount = photoPageCount(p);
+    if (pageCount){
       const loadingFor = p.id;
-      setBusy(true, "⏳ Loading photo…");
-      setLoadLine("Loading the invoice photo…");
+      setBusy(true, pageCount > 1 ? `⏳ Loading ${pageCount} pages…` : "⏳ Loading photo…");
+      setLoadLine(pageCount > 1 ? `Loading the invoice photos (${pageCount} pages)…` : "Loading the invoice photo…");
       try{
-        const b64 = await getPurchasePhoto(shop.shopCode, p.id);
-        if (editingId === loadingFor && !photoChanged) showPhoto(b64);
+        const list = await getPurchasePhotos(shop.shopCode, p);
+        if (editingId === loadingFor && !photoChanged) setPhotos(list.map(newPage));
       }catch(e){ console.error(e); toast("Couldn't load the photo — check your connection"); }
       setLoadLine("");
       setBusy(false);
@@ -1140,13 +1211,13 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
     try{
       if (editingId){
-        // undefined = leave photo alone, null = remove it, string = replace it
-        await updatePurchase(shop.shopCode, editingId, data, photoChanged ? photoB64 : undefined);
+        // undefined = leave the pages alone; an array = the pages now (empty removes them all)
+        await updatePurchase(shop.shopCode, editingId, data, photoChanged ? photos.map(pg => pg.b64) : undefined);
         toast("Purchase updated");
         resetForm();
         showTab("history");
       } else {
-        await createPurchase(shop.shopCode, data, photoB64);
+        await createPurchase(shop.shopCode, data, photos.map(pg => pg.b64));
         toast(`Saved · ${rupee(total)}${pay.credit > 0 ? " · due " + rupee(pay.credit) : ""}`);
         resetForm();
       }
@@ -1160,7 +1231,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
 
   $("btnDelete").onclick = async () => {
     if (!editingId) return;
-    if (!confirm("Delete this purchase and its invoice photo? The supplier's balance will be recalculated.")) return;
+    if (!confirm("Delete this purchase and its invoice photos? The supplier's balance will be recalculated.")) return;
     try{
       await deletePurchase(shop.shopCode, editingId);
       toast("Purchase deleted");
@@ -1201,7 +1272,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
       const due = r2((p.total || 0) - (p.paidNow || 0));
       return `<div class="history-item" data-id="${p.id}">
         <div class="hi-left" style="min-width:0;">
-          <b style="font-family:var(--sans);">${p.hasPhoto ? "📷 " : ""}${escapeHtml(supplierLabel(p))}</b>
+          <b style="font-family:var(--sans);">${p.hasPhoto ? (photoPageCount(p) > 1 ? `📷${photoPageCount(p)} ` : "📷 ") : ""}${escapeHtml(supplierLabel(p))}</b>
           <div>${fmtDate(p.invoiceDate)}${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""}${(p.items || []).length ? ` · ${p.items.length} product${p.items.length !== 1 ? "s" : ""}` : ""} · ${escapeHtml(payLabel(p))}</div>
         </div>
         <div style="flex-shrink:0; margin-left:10px;">
@@ -1318,7 +1389,7 @@ Respond with ONLY minified JSON, no markdown fences, exactly matching this shape
         const p = e.rec, paid = paidParts(p);
         return `<div class="ledger-row">
           <div class="lg-info" data-pid="${p.id}">
-            <div class="lg-t1">${p.hasPhoto ? "📷 " : ""}Purchase${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""}</div>
+            <div class="lg-t1">${p.hasPhoto ? (photoPageCount(p) > 1 ? `📷${photoPageCount(p)} ` : "📷 ") : ""}Purchase${p.invoiceNo ? " · Inv " + escapeHtml(p.invoiceNo) : ""}</div>
             <div class="lg-t2">${fmtDate(p.invoiceDate)} · total ${rupee(p.total)} · ${paid ? "paid " + paid : "on credit"}</div>
           </div>
           <div><div class="lg-amt" style="color:${e.delta > 0 ? "var(--danger)" : "var(--ink-soft)"};">${e.delta > 0 ? "+" + rupee(e.delta) : "—"}</div><div class="lg-bal">bal ${rupee(e.running)}</div></div>

@@ -139,43 +139,63 @@ export async function deleteSupplier(shopCode, supplierId) {
 export function subscribePurchases(shopCode, cb) {
   return subscribeCol(shopCode, "purchases", cb, "invoiceDate");
 }
-// Invoice photos live in their own collection (same id as the purchase) so the purchase
-// list stays small — a photo is only downloaded when that purchase is opened.
-// Purchase + photo are written in one batch: both save, or neither does.
-const photoRef = (shopCode, purchaseId) => doc(db, "shops", shopCode, "purchasePhotos", purchaseId);
+// Invoice photos live in their own collection so the purchase list stays small — a photo is
+// only downloaded when that purchase is opened. A long invoice can have several pages: page 1
+// is stored under the purchase id (as before), page 2 under "<id>_p2", page 3 under "<id>_p3"…
+// one document per page because a Firestore document holds at most 1 MiB.
+// The purchase keeps hasPhoto and photoPages (older purchases have no photoPages: 1 page).
+// Purchase + photos are written in one batch: everything saves, or nothing does.
+export const MAX_PHOTO_PAGES = 6;
+const photoRef = (shopCode, purchaseId, page = 1) =>
+  doc(db, "shops", shopCode, "purchasePhotos", page === 1 ? purchaseId : `${purchaseId}_p${page}`);
+export const photoPageCount = (p) => (p && p.hasPhoto) ? Math.max(1, Number(p.photoPages) || 1) : 0;
 
-export async function createPurchase(shopCode, data, photoB64) {
+function writePhotoPages(batch, shopCode, purchaseId, pages, oldCount) {
+  pages.forEach((b64, i) => batch.set(photoRef(shopCode, purchaseId, i + 1), { data: b64, page: i + 1, createdAt: serverTimestamp() }));
+  for (let n = pages.length + 1; n <= Math.max(oldCount, pages.length); n++) batch.delete(photoRef(shopCode, purchaseId, n));
+}
+const cleanPages = (pages) => (Array.isArray(pages) ? pages : (pages ? [pages] : [])).filter(Boolean).slice(0, MAX_PHOTO_PAGES);
+
+// pages: array of base64 photos, one per invoice page (may be empty)
+export async function createPurchase(shopCode, data, pages) {
+  pages = cleanPages(pages);
   const ref = doc(collection(db, "shops", shopCode, "purchases"));
   const batch = writeBatch(db);
-  batch.set(ref, Object.assign({}, data, { hasPhoto: !!photoB64, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-  if (photoB64) batch.set(photoRef(shopCode, ref.id), { data: photoB64, createdAt: serverTimestamp() });
+  batch.set(ref, Object.assign({}, data, { hasPhoto: pages.length > 0, photoPages: pages.length, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  writePhotoPages(batch, shopCode, ref.id, pages, 0);
   await batch.commit();
   return ref.id;
 }
-// photoB64: a new photo to replace the old one, null to remove the photo,
-// or undefined to leave the photo as it is.
-export async function updatePurchase(shopCode, purchaseId, data, photoB64) {
+// pages: undefined = leave the photos as they are; an array (possibly empty) = replace them all.
+export async function updatePurchase(shopCode, purchaseId, data, pages) {
+  const purRef = doc(db, "shops", shopCode, "purchases", purchaseId);
   const batch = writeBatch(db);
   const fields = Object.assign({}, data, { updatedAt: serverTimestamp() });
-  if (photoB64) {
-    fields.hasPhoto = true;
-    batch.set(photoRef(shopCode, purchaseId), { data: photoB64, createdAt: serverTimestamp() });
-  } else if (photoB64 === null) {
-    fields.hasPhoto = false;
-    batch.delete(photoRef(shopCode, purchaseId));
+  if (pages !== undefined) {
+    pages = cleanPages(pages);
+    const before = await getDoc(purRef);
+    const oldCount = before.exists() ? Math.max(photoPageCount(before.data()), 1) : 1;
+    fields.hasPhoto = pages.length > 0;
+    fields.photoPages = pages.length;
+    writePhotoPages(batch, shopCode, purchaseId, pages, oldCount);
   }
-  batch.update(doc(db, "shops", shopCode, "purchases", purchaseId), fields);
+  batch.update(purRef, fields);
   await batch.commit();
 }
 export async function deletePurchase(shopCode, purchaseId) {
+  const purRef = doc(db, "shops", shopCode, "purchases", purchaseId);
+  const before = await getDoc(purRef);
+  const count = before.exists() ? Math.max(photoPageCount(before.data()), 1) : 1;
   const batch = writeBatch(db);
-  batch.delete(doc(db, "shops", shopCode, "purchases", purchaseId));
-  batch.delete(photoRef(shopCode, purchaseId));
+  batch.delete(purRef);
+  writePhotoPages(batch, shopCode, purchaseId, [], count);
   await batch.commit();
 }
-export async function getPurchasePhoto(shopCode, purchaseId) {
-  const snap = await getDoc(photoRef(shopCode, purchaseId));
-  return snap.exists() ? snap.data().data : null;
+// All pages of a purchase's invoice, in order (missing pages are skipped).
+export async function getPurchasePhotos(shopCode, purchase) {
+  const count = photoPageCount(purchase);
+  const snaps = await Promise.all(Array.from({ length: count }, (_, i) => getDoc(photoRef(shopCode, purchase.id, i + 1))));
+  return snaps.filter(sn => sn.exists()).map(sn => sn.data().data);
 }
 
 export function subscribeSupplierPayments(shopCode, cb) {
